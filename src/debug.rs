@@ -173,3 +173,27 @@ macro_rules! print {
         }
     }
 }
+
+/// Turn the 2-wire debug interface off (or back on) at run time, freeing
+/// PB14/PB15 (TIO/TCK) for GPIO and peripherals (CH592).
+///
+/// With `CFG_DEBUG_EN` set in the user config, those pins are the debug
+/// link's alone (datasheet pin descriptions, note 3); `R16_PIN_ALTERNATE` bit 13
+/// releases them until the next reset. The datasheet says only parts whose
+/// lot number's fifth digit is 1 or more implement the bit; on older parts
+/// it does nothing and the pins stay with the debugger.
+///
+/// While it is off, the debugger cannot attach and SDI print goes nowhere.
+/// Reset the chip to get it back; leave a delay before calling this so the
+/// debugger can still catch the chip after a reset.
+#[cfg(ch592)]
+pub fn set_debug_interface_enabled(enabled: bool) {
+    critical_section::with(|_| crate::pac::SYS.pin_alternate().modify(|w| w.set_debug_en(!enabled)));
+}
+
+/// Whether the user config enables the 2-wire debug interface
+/// (`CFG_DEBUG_EN`), regardless of [`set_debug_interface_enabled`] (CH592).
+#[cfg(ch592)]
+pub fn debug_interface_configured() -> bool {
+    crate::pac::SYSTEM_CONTROL.glob_cfg_info().read().cfg_debug_en()
+}

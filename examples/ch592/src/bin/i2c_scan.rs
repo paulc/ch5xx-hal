@@ -2,8 +2,9 @@
 //! 115200 8N1).
 //!
 //! **Not run by the test suite**: PB14/PB15 are the debug link's TIO/TCK, so
-//! this takes the debugger (and SDI print) off the chip. The first 5 s keep
-//! the pins alone, so a debugger can still erase the chip after a reset.
+//! the driver turns the debug interface off, taking the debugger (and SDI
+//! print) off the chip until reset. The first 5 s keep the pins alone, so a
+//! debugger can still erase the chip after a reset.
 //!
 //! Wire an I2C device with pull-ups to PB14/PB15 and a USB-serial adapter's
 //! RX to PA9.
@@ -36,7 +37,11 @@ fn main() -> ! {
     let mut tx = UartTx::new_blocking::<0>(p.UART1, p.PA9, uart::Config::default()).unwrap();
     let mut w = W(&mut tx);
 
-    let _ = writeln!(w, "i2c_scan: starting in 5 s");
+    let _ = writeln!(
+        w,
+        "i2c_scan: starting in 5 s (debug interface in user config: {})\r",
+        hal::debug::debug_interface_configured()
+    );
     delay.delay_ms(5000);
 
     let mut bus = I2c::new_blocking::<0>(p.I2C0, p.PB15, p.PB14, Hertz::khz(100), i2c::Config::default());
@@ -55,7 +60,7 @@ fn main() -> ! {
                 }
             }
         }
-        let _ = writeln!(w, " ({} found)", found);
+        let _ = writeln!(w, " ({} found)\r", found);
         delay.delay_ms(2000);
     }
 }

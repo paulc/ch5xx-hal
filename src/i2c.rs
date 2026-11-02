@@ -13,8 +13,12 @@
 //!
 //! # Pins (CH592)
 //!
-//! SCL PB15, SDA PB14 — the debug link's TCK/TIO. Starting the driver takes
-//! the debugger off the chip.
+//! SCL PB15, SDA PB14 — the debug link's TCK/TIO. With the debug interface
+//! enabled in the user config the pins belong to it, so creating the driver
+//! turns the interface off ([`crate::debug::set_debug_interface_enabled`])
+//! and dropping it turns it back on. That takes the debugger (and SDI
+//! print) off the chip, and needs a part whose lot number supports it; on
+//! older parts disable `CFG_DEBUG_EN` with the ISP tool instead.
 
 use core::future::poll_fn;
 use core::marker::PhantomData;
@@ -172,6 +176,7 @@ impl<'d, T: Instance> I2c<'d, T, Blocking> {
 impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
     fn new_inner(peri: Peri<'d, T>, scl: Peri<'d, AnyPin>, sda: Peri<'d, AnyPin>, freq: Hertz, config: Config) -> Self {
         T::enable();
+        crate::debug::set_debug_interface_enabled(false);
 
         // The peripheral switches its pins to open-drain output when it
         // drives them.
@@ -677,6 +682,7 @@ impl<'d, T: Instance, M: Mode> Drop for I2c<'d, T, M> {
         T::regs().ctrl1().modify(|w| w.set_pe(false));
         crate::gpio::SealedPin::set_as_disconnected(&*self._scl);
         crate::gpio::SealedPin::set_as_disconnected(&*self._sda);
+        crate::debug::set_debug_interface_enabled(true);
     }
 }
 
