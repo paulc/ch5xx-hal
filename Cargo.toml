@@ -23,6 +23,7 @@ qingke = { version = "0.8.2", features = ["critical-section-impl", "unsafe-trust
 qingke-rt = { version = "0.8.2", optional = true }
 
 embedded-hal = "1.0"
+embedded-hal-async = "1.0.0"
 embedded-hal-nb = "1.0.0"
 embedded-io = "0.7.1"
 embedded-io-async = "0.7.0"
@@ -52,6 +53,9 @@ default = ["rt"]
 rt = ["dep:qingke-rt"]
 ## embassy-time driver on the core SysTick (CH592 only so far).
 embassy = ["rt", "dep:embassy-time-driver", "dep:embassy-time-queue-utils"]
+## Built-in GPIO_A/GPIO_B interrupt handlers for `exti::ExtiInput` (CH592).
+## Disable to provide your own.
+exti = ["rt"]
 
 # Chip-selection features. Exactly one must be enabled; `ch5xx-metapac` panics
 # otherwise. Each chip also selects its QingKe core, as ch32-hal does, since the

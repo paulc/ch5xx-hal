@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ch5xx-hal = { path = "../../", features = ["ch592", "rt", "memory-x", "embassy"] }
+ch5xx-hal = { path = "../../", features = ["ch592", "rt", "memory-x", "embassy", "exti"] }
 
 panic-halt = "1.0"
 embedded-hal = "1.0.0"

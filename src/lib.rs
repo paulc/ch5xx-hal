@@ -89,6 +89,11 @@ pub(crate) mod sys;
 pub mod embassy;
 
 pub mod delay;
+#[cfg(ch592)]
+pub mod exti;
+// Only `exti` uses it so far, and that is CH592-only.
+#[cfg(not(ch592))]
+use embedded_hal_async as _;
 pub mod gpio;
 pub mod uart;
 
@@ -119,6 +124,8 @@ pub fn init(config: Config) -> Peripherals {
 
     critical_section::with(|cs| unsafe {
         gpio::init(cs);
+        #[cfg(all(ch592, feature = "exti"))]
+        exti::init(cs);
     });
 
     p
