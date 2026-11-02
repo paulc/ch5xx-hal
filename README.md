@@ -3,9 +3,8 @@
 Rust HAL (Hardware Abstraction Layer) crate for WCH's CH5xx BLE microcontrollers.
 
 > **Note**
-> This project is under development. Only a small part of the peripheral set is
-> implemented, and only CH585 has been exercised on real hardware. Expect the
-> API to change.
+> This project is under development. Most peripheral drivers exist for CH592
+> only; CH585 has the core (GPIO, delay, clocks). Expect the API to change.
 
 This HAL follows the [ch32-hal](https://github.com/ch32-rs/ch32-hal) layout and
 the metapac approach: register access comes from a single
@@ -17,7 +16,7 @@ code serves every supported chip in the family.
 | Chip  | Core      | Status                          |
 | ----- | --------- | ------------------------------- |
 | CH585 | QingKe V3C | Bring-up target; blinky verified on hardware |
-| CH592 | QingKe V4C | Builds and links; not yet run on hardware |
+| CH592 | QingKe V4C | Peripheral drivers below, tested on a WeAct CH592F board |
 
 Chip support is selected with a Cargo feature (`ch585`, `ch592`). Exactly one
 must be enabled. The chip feature also selects the QingKe core for `qingke` /
@@ -26,12 +25,33 @@ QFN32 (CH592X) set, PA4–PA15, PB0, PB4, PB6, PB7, PB10–PB15, PB22 and PB23.
 
 ## Implemented so far
 
-- `init()` — clock/frequency setup and GPIO bring-up
-- `gpio` — input, output, flex pins, internal pull up/down, drive strength
-- `delay` — `embedded-hal` `DelayNs`, backed by the core SysTick
-- `rcc` — reports the measured system clock
+All chips:
 
-Everything else (UART, SPI, I2C, timers, BLE, USB, …) is not implemented yet.
+- `init()`: clock/frequency setup and GPIO bring-up
+- `gpio`: input, output, flex pins, internal pull up/down, drive strength
+- `delay`: `embedded-hal` `DelayNs`, backed by the core SysTick
+- `rcc`: system clock (CH592: HSE/PLL selection; CH585: measured)
+
+CH592 only. The APIs follow ch32-hal where one exists. "HW" marks what has
+been checked on a WeAct CH592F board by the test examples in `examples/ch592`.
+
+| Module | Driver | HW |
+| ------ | ------ | -- |
+| `debug` | SDI print (`println!` over the debug link) | yes |
+| `embassy` | `embassy-time` driver on SysTick (feature `embassy`) | yes |
+| `exti` | `ExtiInput` pin interrupts, async edge/level waits (feature `exti`) | yes |
+| `uart` | UART0–3, blocking and async, `embedded-io(-async)` | yes (UART0 remap pins untested) |
+| `spi` | SPI0 master, blocking and async, `embedded-hal(-async)` | partly (no MOSI→MISO loopback yet) |
+| `adc` | single-ended and differential, PGA, calibration, temperature, VBAT | yes |
+| `timer::simple_pwm` | `SimplePwm` on TMR0–3 | yes (TMR1/TMR2 remap pins untested) |
+| `timer::pwmx` | 8/16-bit PWMX channels 4–11 | yes |
+| `rtc` | counter, alarm, periodic flag, LSI or LSE | yes |
+| `wdg` | `IndependentWatchdog` (IWDG) | yes |
+| `i2c` | I2C0 master, blocking and async, `embedded-hal(-async)` | no (pins are the debug link) |
+| `usb` | full-speed device for `embassy-usb` | enumeration only |
+
+Not implemented: BLE, low-power modes, timer capture, LSI calibration, CH585
+peripherals.
 
 ## What differs from CH32
 
