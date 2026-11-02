@@ -108,6 +108,8 @@ pub mod spi;
 pub mod timer;
 pub mod uart;
 #[cfg(ch592)]
+pub mod usb;
+#[cfg(ch592)]
 pub mod wdg;
 
 pub struct Config {
