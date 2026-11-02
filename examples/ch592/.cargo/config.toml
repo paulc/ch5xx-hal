@@ -8,11 +8,9 @@ target = "riscv32imac-unknown-none-elf"
 # to start wlink's flash routine on CH592 (WCH-LinkE firmware v3.2).
 runner = "wlink --chip CH59X --speed low flash"
 # runner = "probe-rs run --chip CH592"
-rustflags = [
-    # Target features:
-    "-C",
-    "target-feature=+xwchc",
-]
+# No `-C target-feature=+xwchc` (WCH's extra compressed opcodes, ~2-3% smaller
+# code): rustc does not know the feature and warns that passing it will become
+# a hard error (rust-lang/rust#162235).
 
 [unstable]
 build-std = ["core"]

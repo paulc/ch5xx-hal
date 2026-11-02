@@ -6,11 +6,9 @@ target = "riscv32imac-unknown-none-elf"
 # Swap back to `wlink flash` if you only want to program the part.
 # runner = "wlink flash"
 runner = "probe-rs run --chip CH585"
-rustflags = [
-    # Target features:
-    "-C",
-    "target-feature=+xwchc",
-]
+# No `-C target-feature=+xwchc` (WCH's extra compressed opcodes, ~2-3% smaller
+# code): rustc does not know the feature and warns that passing it will become
+# a hard error (rust-lang/rust#162235).
 
 [unstable]
 build-std = ["core"]
