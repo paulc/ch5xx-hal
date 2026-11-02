@@ -67,9 +67,15 @@ cargo run --release --bin blinky
 
 `examples/ch592` blinks the LED on PA8 of the WeAct CH592F core board (on the
 WCH EVT board, wire P2-18 (PA8) to P2-22 (LED0)). probe-rs has no CH59x target
-yet, so its runner is `wlink --chip CH59X flash`; the `--chip` is required,
-since wlink cannot auto-detect CH5xx parts. Debug must first be enabled in the
-user config with `wchisp config enable-debug`.
+yet, so its runner is `wlink --chip CH59X --speed low flash`. Both options are
+required: wlink cannot auto-detect CH5xx parts, and at the default speed the
+probe fails to start the flash routine on CH592 (`protocol error: 0x55`).
+
+The two-wire debug interface must first be enabled in the user config
+(`CFG_DEBUG_EN`, via `wchisp config enable-debug`). Note that on CH592 USB-ISP
+flashing with `wchisp` fails verify while debug is enabled
+([wchisp#93](https://github.com/ch32-rs/wchisp/issues/93)), so pick one or the
+other.
 
 The runner is `probe-rs run --chip CH585`, so `cargo run` flashes, resets, and
 streams `defmt` output in one step. A `wlink flash` runner is kept commented out

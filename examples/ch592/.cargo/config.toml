@@ -4,7 +4,9 @@ target = "riscv32imac-unknown-none-elf"
 [target.riscv32imac-unknown-none-elf]
 # probe-rs has no CH59x target yet, so flash with wlink. `--chip` is required:
 # wlink cannot auto-detect CH5xx parts and fails to attach (error 0x55).
-runner = "wlink --chip CH59X flash"
+# `--speed low` is required too: at the default (high) speed the probe fails
+# to start wlink's flash routine on CH592 (WCH-LinkE firmware v3.2).
+runner = "wlink --chip CH59X --speed low flash"
 # runner = "probe-rs run --chip CH592"
 rustflags = [
     # Target features:
