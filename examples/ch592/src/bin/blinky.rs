@@ -1,16 +1,9 @@
-//! Blink the two LEDs on the CH592 EVT board.
+//! Blink the LED on the WeAct CH592F core board.
 //!
-//! The board's LEDs are not tied to GPIOs; they sit on the extension headers
-//! and are active low (anode to 3V3). Wire them up before running:
+//! The LED (D2) is on PA8 and is active low (anode to 3V3 through R1).
 //!
-//! - LED0: jumper P2-20 (PA9) to P2-22 (LED0)
-//! - LED1: wire P3-15 (PB13) to P3-21 (LED1)
-//!
-//! PB15, next to LED1 on P3, is avoided because it is the debug clock (TCK)
-//! together with PB14 (TIO).
-//!
-//! The LEDs are driven in opposite phase so a working build is obvious even
-//! with only one wired.
+//! On WCH's CH592 EVT board the LEDs are not tied to GPIOs; wire P2-18 (PA8)
+//! to P2-22 (LED0), which is also active low.
 
 #![no_std]
 #![no_main]
@@ -30,14 +23,13 @@ static mut BLINKS: u32 = 0;
 fn main() -> ! {
     let p = hal::init(Default::default());
 
-    let mut led0 = Output::new(p.PA9, Level::Low, Speed::Low);
-    let mut led1 = Output::new(p.PB13, Level::High, Speed::Low);
+    // Start with the LED off.
+    let mut led = Output::new(p.PA8, Level::High, Speed::Low);
 
     let mut delay = Delay;
 
     loop {
-        led0.toggle();
-        led1.toggle();
+        led.toggle();
         unsafe { BLINKS = BLINKS.wrapping_add(1) };
         delay.delay_ms(500);
     }

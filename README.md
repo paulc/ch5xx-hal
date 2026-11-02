@@ -65,9 +65,11 @@ cd examples/ch585
 cargo run --release --bin blinky
 ```
 
-`examples/ch592` does the same on the CH592 EVT board, whose LEDs are not tied
-to GPIOs: jumper P2-20 (PA9) to P2-22 (LED0) and wire P3-15 (PB13) to P3-21
-(LED1). The runner there is `probe-rs run --chip CH592`.
+`examples/ch592` blinks the LED on PA8 of the WeAct CH592F core board (on the
+WCH EVT board, wire P2-18 (PA8) to P2-22 (LED0)). probe-rs has no CH59x target
+yet, so its runner is `wlink --chip CH59X flash`; the `--chip` is required,
+since wlink cannot auto-detect CH5xx parts. Debug must first be enabled in the
+user config with `wchisp config enable-debug`.
 
 The runner is `probe-rs run --chip CH585`, so `cargo run` flashes, resets, and
 streams `defmt` output in one step. A `wlink flash` runner is kept commented out

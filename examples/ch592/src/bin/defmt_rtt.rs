@@ -1,18 +1,16 @@
 //! Log to the host with `defmt` over SEGGER RTT.
 //!
 //! RTT is a RAM-based ring buffer that the debugger reads out of memory, so it
-//! needs no UART pin and no special chip support — unlike SDI printf, which the
-//! CH592 does not have.
+//! needs no UART pin.
+//!
+//! NOTE: this needs a probe-rs that can attach to CH592, and probe-rs has no
+//! CH59x target yet (it also always attaches with the CH32V103 family code,
+//! which a CH59x does not answer). It builds, but the default `wlink` runner
+//! only flashes it; nothing reads the RTT buffer. Once probe-rs supports the
+//! part:
 //!
 //! ```console
-//! cargo run --release --bin defmt_rtt
-//! ```
-//!
-//! or, separately:
-//!
-//! ```console
-//! probe-rs download --chip CH592 target/riscv32imac-unknown-none-elf/release/defmt_rtt
-//! probe-rs attach --chip CH592 target/riscv32imac-unknown-none-elf/release/defmt_rtt
+//! probe-rs run --chip CH592 target/riscv32imac-unknown-none-elf/release/defmt_rtt
 //! ```
 
 #![no_std]
