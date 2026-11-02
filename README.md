@@ -39,8 +39,24 @@ set this up in `.cargo/config.toml`:
 
 ```console
 cargo +nightly build -Zbuild-std=core --target riscv32imac-unknown-none-elf --release --features ch592
-cargo +nightly doc -Zbuild-std=core --target riscv32imac-unknown-none-elf --features ch592,embassy,exti --no-deps
 ```
+
+### API docs
+
+The modules shown depend on the chip feature, so build the docs per chip.
+Both builds write to the same directory, so give the second one its own
+`--target-dir` to keep both:
+
+```console
+# CH592: target/riscv32imac-unknown-none-elf/doc/ch5xx_hal/index.html
+cargo +nightly doc -Zbuild-std=core --target riscv32imac-unknown-none-elf --features ch592,embassy,exti --no-deps
+
+# CH585: target/doc-ch585/riscv32imac-unknown-none-elf/doc/ch5xx_hal/index.html
+cargo +nightly doc -Zbuild-std=core --target riscv32imac-unknown-none-elf --features ch585 --no-deps --target-dir target/doc-ch585
+```
+
+Add `--open` to open the result in a browser, or serve the `doc` directory
+(`python3 -m http.server`).
 
 ## Implemented so far
 
