@@ -221,6 +221,8 @@ pub(crate) trait SealedPin {
             AfType::Input(pull) => {
                 self.set_direction(false);
                 self.set_pull(pull);
+                #[cfg(ch592)]
+                self.set_digital_input(true);
             }
             AfType::Output(speed) => {
                 // Idle high, like the UART/SPI idle level, until the
@@ -238,7 +240,44 @@ pub(crate) trait SealedPin {
         critical_section::with(|_| {
             self.set_direction(false);
             self.set_pull(Pull::None);
+            #[cfg(ch592)]
+            self.set_digital_input(true);
         })
+    }
+
+    /// Make the pin an analog input: floating, with its digital input off
+    /// where the chip allows it.
+    #[cfg_attr(not(ch592), allow(unused))]
+    #[inline]
+    fn set_as_analog(&self) {
+        critical_section::with(|_| {
+            self.set_direction(false);
+            self.set_pull(Pull::None);
+            #[cfg(ch592)]
+            self.set_digital_input(false);
+        })
+    }
+
+    /// Turn the pin's digital input buffer on or off (`R32_PIN_CONFIG2`).
+    ///
+    /// The bits pack like the PB interrupt bits: PA*n* is bit *n*, PB*n* bit
+    /// 16 + *n*, and PB22/PB23 bits 24/25.
+    #[cfg(ch592)]
+    #[inline]
+    fn set_digital_input(&self, enabled: bool) {
+        let n = self._pin();
+        let bit = match self._port() {
+            Port::A => n,
+            Port::B if n >= 16 => n + 2,
+            Port::B => 16 + n,
+        };
+        pac::SYS.pin_config2().modify(|w| {
+            if enabled {
+                w.0 &= !(1 << bit)
+            } else {
+                w.0 |= 1 << bit
+            }
+        });
     }
 
     /// Set the drive strength (only meaningful for an output).
@@ -307,6 +346,8 @@ impl<'d> Flex<'d> {
         critical_section::with(|_| {
             self.pin.set_direction(false);
             self.pin.set_pull(pull);
+            #[cfg(ch592)]
+            self.pin.set_digital_input(true);
         });
     }
 
