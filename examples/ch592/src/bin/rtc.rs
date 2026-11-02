@@ -1,4 +1,5 @@
-//! RTC test: counter rate against the HSE-derived SysTick, setting the
+//! RTC test: counter rate against the HSE-derived SysTick, LSI calibration,
+//! setting the
 //! counter across a day boundary, the alarm and the periodic flag, then an
 //! attempt to switch to a 32.768 kHz crystal on PA10/PA11 (reported, not
 //! required). Results are reported over SDI print.
@@ -49,8 +50,29 @@ async fn main(_spawner: Spawner) -> ! {
 
     let hz = rate(&rtc, 1000).await;
     hal::println!("LSI: {} Hz", hz);
-    // Uncalibrated, the LSI is a few percent off (31.0 kHz on one CH592F).
-    c.check("LSI within 10% of 32768 Hz", hz.abs_diff(32_768) < 3_277);
+    // Uncalibrated, the LSI is a few percent off (30.7 kHz on one CH592F).
+    // The trim survives resets, so an earlier calibration may still apply.
+    c.check("LSI within 20% of 32768 Hz", hz.abs_diff(32_768) < 6_554);
+
+    let tune0 = hal::pac::SYS.int32k_tune().read().int32k_tune();
+    let t0 = Instant::now();
+    let r = rtc.calibrate_lsi(32_768);
+    let ms = t0.elapsed().as_millis();
+    let tune1 = hal::pac::SYS.int32k_tune().read().int32k_tune();
+    hal::println!(
+        "calibrate_lsi: {:?} in {} ms, tune {:#06x} -> {:#06x}",
+        r,
+        ms,
+        tune0,
+        tune1
+    );
+    c.check(
+        "calibrate_lsi reports under 500 ppm",
+        matches!(r, Ok(e) if e.abs() < 500),
+    );
+    let hz = rate(&rtc, 1000).await;
+    hal::println!("LSI after calibration: {} Hz", hz);
+    c.check("calibrated LSI within 0.1% of 32768 Hz", hz.abs_diff(32_768) < 33);
 
     // Set just before the end of day 5 and watch it roll over.
     let t = 6 * TICKS_PER_DAY - TICKS_PER_SECOND / 4;

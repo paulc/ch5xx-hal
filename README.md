@@ -45,13 +45,12 @@ been checked on a WeAct CH592F board by the test examples in `examples/ch592`.
 | `adc` | single-ended and differential, PGA, calibration, temperature, VBAT | yes |
 | `timer::simple_pwm` | `SimplePwm` on TMR0–3 | yes (TMR1/TMR2 remap pins untested) |
 | `timer::pwmx` | 8/16-bit PWMX channels 4–11 | yes |
-| `rtc` | counter, alarm, periodic flag, LSI or LSE | yes |
+| `rtc` | counter, alarm, periodic flag, LSI or LSE, LSI calibration | yes |
 | `wdg` | `IndependentWatchdog` (IWDG) | yes |
 | `i2c` | I2C0 master, blocking and async, `embedded-hal(-async)` | no (pins are the debug link) |
 | `usb` | full-speed device for `embassy-usb` | enumeration only |
 
-Not implemented: BLE, low-power modes, timer capture, LSI calibration, CH585
-peripherals.
+Not implemented: BLE, low-power modes, timer capture, CH585 peripherals.
 
 ## What differs from CH32
 

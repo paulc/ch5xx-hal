@@ -65,6 +65,8 @@ pub enum Periodic {
 pub enum Error {
     /// The 32.768 kHz crystal did not start; the RTC stays on the LSI.
     LseNotRunning,
+    /// [`Rtc::calibrate_lsi`] needs the RTC on the LSI.
+    NotOnLsi,
 }
 
 /// RTC driver.
@@ -229,4 +231,91 @@ impl<'d> Rtc<'d> {
     pub fn clear_periodic(&mut self) {
         pac::RTC.flag_ctrl().write(|w| w.set_tmr_clr(true));
     }
+
+    /// Trim the LSI (`R16_INT32K_TUNE`) to `target_hz` against the system
+    /// clock and return the remaining error in ppm.
+    ///
+    /// WCH's `Calibration_LSI` aims for 32000 Hz (the BLE stack's LSI rate);
+    /// 32768 Hz makes [`TICKS_PER_SECOND`] hold on the LSI too. The result is
+    /// only as good as the system clock: run from the HSE (or the PLL), not
+    /// an RC. It takes about 0.5 s. The trim survives resets other than
+    /// power-on, but the LSI drifts with temperature and supply, so repeat it
+    /// now and then.
+    pub fn calibrate_lsi(&mut self, target_hz: u32) -> Result<i32, Error> {
+        if self.clock_source() != ClockSource::Lsi {
+            return Err(Error::NotOnLsi);
+        }
+        // `INT32K_TUNE` holds a coarse trim in [4:0] (about 2% a step on one
+        // CH592F) and a fine trim in [12:5] (8 bits); the frequency rises
+        // with both. The step sizes are not documented, so binary-search
+        // each: coarse with the fine trim centred, then fine.
+        let err = |coarse: u16, fine: u16| {
+            let tune = coarse | fine << 5;
+            safe_access(|| pac::SYS.int32k_tune().write(|w| w.set_int32k_tune(tune)));
+            lsi_error_ppm(target_hz)
+        };
+        let coarse = highest_at_or_below(0x1f, |c| err(c, 0x80));
+        let fine = highest_at_or_below(0xff, |f| err(coarse, f));
+        // The target lies between `fine` and the step above it.
+        let below = err(coarse, fine);
+        if fine < 0xff {
+            let above = err(coarse, fine + 1);
+            if above.abs() < below.abs() {
+                return Ok(above as i32);
+            }
+            err(coarse, fine);
+        }
+        Ok(below as i32)
+    }
+}
+
+/// The highest `v` in `0..=max` with `err(v) <= 0`, for `err` rising with
+/// `v` (0 if none is).
+fn highest_at_or_below(max: u16, mut err: impl FnMut(u16) -> i64) -> u16 {
+    let (mut lo, mut hi) = (0, max);
+    while lo < hi {
+        let mid = (lo + hi + 1) / 2;
+        if err(mid) <= 0 {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    lo
+}
+
+/// LSI error against `target_hz` in ppm, measured over 1024 CK32K periods
+/// (about 31 ms) of SysTick time.
+fn lsi_error_ppm(target_hz: u32) -> i64 {
+    const PERIODS: u16 = 1024;
+    // `CNT_32K`, read until two reads agree (it is in the CK32K domain).
+    let cnt = || {
+        let p = (pac::RTC.as_ptr() as *const u8).wrapping_add(0x38) as *const u16;
+        loop {
+            let a = unsafe { p.read_volatile() };
+            if a == unsafe { p.read_volatile() } {
+                return a;
+            }
+        }
+    };
+    // Wait for a counter edge with interrupts off, so only polling jitter
+    // adds to the window.
+    let edge = || {
+        critical_section::with(|_| {
+            let c = cnt();
+            loop {
+                let n = cnt();
+                if n != c {
+                    return (n, crate::delay::ticks());
+                }
+            }
+        })
+    };
+    let (c0, t0) = edge();
+    while cnt().wrapping_sub(c0) < PERIODS - 1 {}
+    let (c1, t1) = edge();
+    let periods = c1.wrapping_sub(c0) as i64;
+    let dt = t1.wrapping_sub(t0) as i64;
+    let hz_x1e6 = periods * crate::delay::ticks_per_sec() as i64 * 1_000_000 / dt;
+    (hz_x1e6 - target_hz as i64 * 1_000_000) / target_hz as i64
 }
