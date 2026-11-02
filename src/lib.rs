@@ -91,10 +91,12 @@ pub mod embassy;
 pub mod delay;
 #[cfg(ch592)]
 pub mod exti;
-// Only `exti` uses it so far, and that is CH592-only.
+// Only `exti` and `spi` use it so far, and those are CH592-only.
 #[cfg(not(ch592))]
 use embedded_hal_async as _;
 pub mod gpio;
+#[cfg(ch592)]
+pub mod spi;
 pub mod uart;
 
 pub struct Config {
