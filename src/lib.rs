@@ -87,6 +87,7 @@ pub(crate) mod sys;
 
 pub mod delay;
 pub mod gpio;
+pub mod uart;
 
 pub struct Config {
     pub rcc: rcc::Config,
