@@ -40,14 +40,14 @@ been checked on a WeAct CH592F board by the test examples in `examples/ch592`.
 | `debug` | SDI print (`println!` over the debug link) | yes |
 | `embassy` | `embassy-time` driver on SysTick (feature `embassy`) | yes |
 | `exti` | `ExtiInput` pin interrupts, async edge/level waits (feature `exti`) | yes |
-| `uart` | UART0–3, blocking and async, `embedded-io(-async)` | yes (UART0 remap pins untested) |
-| `spi` | SPI0 master, blocking and async, `embedded-hal(-async)` | partly (no MOSI→MISO loopback yet) |
+| `uart` | UART0–3, blocking and async, `embedded-io(-async)` | yes |
+| `spi` | SPI0 master, blocking and async, `embedded-hal(-async)` | yes (alternate pins PB12–PB15 untested) |
 | `adc` | single-ended and differential, PGA, calibration, temperature, VBAT | yes |
 | `timer::simple_pwm` | `SimplePwm` on TMR0–3 | yes (TMR1/TMR2 remap pins untested) |
 | `timer::pwmx` | 8/16-bit PWMX channels 4–11 | yes |
 | `rtc` | counter, alarm, periodic flag, LSI or LSE, LSI calibration | yes |
 | `wdg` | `IndependentWatchdog` (IWDG) | yes |
-| `i2c` | I2C0 master, blocking and async, `embedded-hal(-async)` | no (pins are the debug link) |
+| `i2c` | I2C0 master, blocking and async, `embedded-hal(-async)`; on PB15/PB14, so it turns the debug interface off | yes (bus scan) |
 | `usb` | full-speed device for `embassy-usb` | yes (CDC-ACM echo; stall and remote wakeup untested) |
 
 Not implemented: BLE, low-power modes, timer capture, CH585 peripherals.
