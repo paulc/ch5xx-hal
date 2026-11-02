@@ -19,8 +19,9 @@
 //! isochronous endpoints and double buffering are not supported. A `write`
 //! or `read` future dropped before it completes leaves its packet armed.
 //!
-//! Tested: enumeration and configuration as a CDC-ACM device on a macOS
-//! host. Not yet tested: bulk data, stall handling, remote wakeup.
+//! Tested: enumeration, control transfers with data both ways, and bulk
+//! OUT/IN as a CDC-ACM echo on a macOS host. Not yet tested: stall
+//! handling, remote wakeup.
 //!
 //! The USB PHY needs the 48 MHz clock from the PLL, so run the system clock
 //! from the PLL (e.g. `SYSCLK_FREQ_60MHZ`).

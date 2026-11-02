@@ -2,7 +2,9 @@
 //! Enumeration progress and echoed data are reported over SDI print.
 //!
 //! On the host the device shows up as a serial port (VID:PID c0de:cafe);
-//! anything written to it comes back. With no host on the USB port the
+//! anything written to it comes back. On macOS open `/dev/cu.usbmodem*`:
+//! the `tty.` node waits for carrier detect, which this class never
+//! reports, so nothing is sent. With no host on the USB port the
 //! device just waits for a bus reset.
 
 #![no_std]

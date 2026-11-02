@@ -48,7 +48,7 @@ been checked on a WeAct CH592F board by the test examples in `examples/ch592`.
 | `rtc` | counter, alarm, periodic flag, LSI or LSE, LSI calibration | yes |
 | `wdg` | `IndependentWatchdog` (IWDG) | yes |
 | `i2c` | I2C0 master, blocking and async, `embedded-hal(-async)` | no (pins are the debug link) |
-| `usb` | full-speed device for `embassy-usb` | enumeration only |
+| `usb` | full-speed device for `embassy-usb` | yes (CDC-ACM echo; stall and remote wakeup untested) |
 
 Not implemented: BLE, low-power modes, timer capture, CH585 peripherals.
 
