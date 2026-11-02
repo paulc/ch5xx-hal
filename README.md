@@ -17,9 +17,12 @@ code serves every supported chip in the family.
 | Chip  | Core      | Status                          |
 | ----- | --------- | ------------------------------- |
 | CH585 | QingKe V3C | Bring-up target; blinky verified on hardware |
+| CH592 | QingKe V4C | Builds and links; not yet run on hardware |
 
-Chip support is selected with a Cargo feature (`ch585`). Exactly one must be
-enabled.
+Chip support is selected with a Cargo feature (`ch585`, `ch592`). Exactly one
+must be enabled. The chip feature also selects the QingKe core for `qingke` /
+`qingke-rt`. Pin singletons only exist for bonded pins; on CH592 that is the
+QFN32 (CH592X) set, PA4–PA15, PB0, PB4, PB6, PB7, PB10–PB15, PB22 and PB23.
 
 ## Implemented so far
 
@@ -61,6 +64,10 @@ across resets. PLL setup itself is not implemented.
 cd examples/ch585
 cargo run --release --bin blinky
 ```
+
+`examples/ch592` does the same on the CH592 EVT board, whose LEDs are not tied
+to GPIOs: jumper P2-20 (PA9) to P2-22 (LED0) and wire P3-15 (PB13) to P3-21
+(LED1). The runner there is `probe-rs run --chip CH592`.
 
 The runner is `probe-rs run --chip CH585`, so `cargo run` flashes, resets, and
 streams `defmt` output in one step. A `wlink flash` runner is kept commented out

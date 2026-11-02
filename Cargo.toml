@@ -47,6 +47,7 @@ rt = ["dep:qingke-rt"]
 # otherwise. Each chip also selects its QingKe core, as ch32-hal does, since the
 # family mixes cores (CH585 is V3C, CH592 is V4C).
 ch585 = ["ch5xx-metapac/ch585", "qingke-rt?/v3c", "qingke/v3c"]
+ch592 = ["ch5xx-metapac/ch592", "qingke-rt?/v4c", "qingke/v4c"]
 
 ## Emit `memory.x` from the metapac's memory layout, so `qingke-rt`'s `link.x`
 ## can find it. Enable in the binary crate, not the HAL (see ch32-hal).

@@ -57,6 +57,12 @@ fn main() {
                 ],
             ),
         ],
+        // CH592X (QFN32), per the DS v1.9 pin description. CH592F/A/D bond a
+        // subset.
+        "ch592" => &[
+            ('A', &[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]),
+            ('B', &[0, 4, 6, 7, 10, 11, 12, 13, 14, 15, 22, 23]),
+        ],
         other => panic!("no GPIO port map for chip `{other}`"),
     };
 
