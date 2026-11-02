@@ -88,9 +88,10 @@ in `.cargo/config.toml` if you only want to program the part.
 
 ## Console output (defmt + RTT)
 
-CH5xx has no SDI printf (the debug-module `DATA0`/`DATA1` handshake is not
-present). Use `defmt` over SEGGER RTT instead — no special chip support is
-needed, and `probe-rs` handles it natively:
+CH585 has no SDI printf (the debug-module `DATA0`/`DATA1` handshake is not
+present). CH592 has it, but wlink needs a one-line patch to use it; see
+`examples/ch592/src/bin/sdi_print.rs`. Otherwise use `defmt` over SEGGER RTT
+— no special chip support is needed, and `probe-rs` handles it natively:
 
 ```console
 cd examples/ch585
