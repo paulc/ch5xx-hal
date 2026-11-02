@@ -57,6 +57,20 @@ fn rtc_count() -> u16 {
     unsafe { core::ptr::read_volatile((RTC_BASE + 0x38) as *const u16) }
 }
 
+/// The free-running SysTick count, at [`ticks_per_sec`] ticks per second.
+#[allow(unused)]
+#[inline]
+pub(crate) fn ticks() -> u32 {
+    SYSTICK.stk_cntl().read().cntl()
+}
+
+/// SysTick ticks per second.
+#[allow(unused)]
+#[inline]
+pub(crate) fn ticks_per_sec() -> u32 {
+    TICKS_PER_SEC.load(Ordering::Relaxed)
+}
+
 impl Delay {
     /// Start SysTick and measure its rate.
     ///
