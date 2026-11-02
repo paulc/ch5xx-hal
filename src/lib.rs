@@ -100,6 +100,8 @@ use embedded_hal_async as _;
 pub mod gpio;
 #[cfg(ch592)]
 pub mod spi;
+#[cfg(ch592)]
+pub mod timer;
 pub mod uart;
 
 pub struct Config {
