@@ -10,7 +10,7 @@
 //! Every HCLK source is derived from the 32 MHz crystal (HSE): either HSE
 //! divided by `CLK_PLL_DIV`, or the 480 MHz PLL (HSE × 15) divided by it. The
 //! frequency is therefore *computed* from `CLK_CFG`, which is exact; the boot
-//! ROM leaves the reset default, HSE / 5 = 6.4 MHz. [`Config::sysclk`] selects
+//! ROM leaves the reset default, HSE / 5 = 6.4 MHz. `Config::sysclk` selects
 //! another rate, applied with the same sequence (and flash timing) as WCH's
 //! `SetSysClock`. The 32 kHz HCLK mode is not offered.
 //!
@@ -20,9 +20,9 @@
 //! "divided from 32 MHz"), but the boot ROM does not leave it there: on the
 //! CH585 used for bring-up it reads `0x014D`, i.e. `CLK_SYS_MOD = 01`
 //! (PLL-sourced) with `CLK_PLL_DIV = 13`. Turning that into a frequency means
-//! modelling the PLL, so instead [`crate::delay::Delay::init`] measures the
-//! real rate against the independent 32 kHz RTC counter and reports it through
-//! [`set_sysclk`]. This port does **not** reconfigure the CH585's PLL.
+//! modelling the PLL, so instead the delay driver's init measures the real
+//! rate against the independent 32 kHz RTC counter and reports it through
+//! [`clocks`]. This port does **not** reconfigure the CH585's PLL.
 //!
 //! [`DEFAULT_FREQUENCY`] is only a starting value, used if calibration fails.
 

@@ -2,16 +2,33 @@
 //!
 //! Ported from `ch32-hal`, adjusted for the CH5xx register model:
 //!
-//! - **No RCC.** Clocks, power and the pin mux live in `SYS` /
-//!   `System_control` at `0x4000_1000`. [`rcc`] only caches the resulting
-//!   frequencies.
-//! - **No AFIO.** Peripheral signals are selected with the `SYS.PIN_ALTERNATE`
-//!   "alternate pin enable" bits.
+//! - **No RCC.** Clocks, power, clock gating and the pin mux live in `SYS` /
+//!   `System_control` at `0x4000_1000`. [`rcc`] sets the system clock (CH592)
+//!   or measures it (CH585) and reports it.
+//! - **No AFIO.** Peripheral signals move to their alternate pins with the
+//!   `SYS.PIN_ALTERNATE` bits; drivers take the choice as a `REMAP` const
+//!   generic, as in ch32-hal.
 //! - **One GPIO block**, `pac::GPIO`, with per-port register groups
 //!   (`pa_out`, `pb_dir`, …) instead of one peripheral per port.
 //!
-//! [`rcc`] is a plain module rather than a driver directory: there is one
-//! clock (HCLK) to configure and report.
+//! # Drivers
+//!
+//! All chips: [`gpio`], [`delay`], [`rcc`], [`debug`] (SDI print works on
+//! CH592 only).
+//!
+//! CH592: `adc`, `embassy` (time driver), `exti`, `i2c`, `rtc`, `spi`,
+//! `timer` (PWM), `uart`, `usb` (`embassy-usb` device) and `wdg`. Where the
+//! peripheral exists in ch32-hal the API follows it; blocking and async
+//! (`embedded-hal`, `embedded-hal-async`, `embedded-io(-async)`) variants
+//! are provided where the hardware allows.
+//!
+//! # Features
+//!
+//! - `ch585` / `ch592`: the chip (exactly one).
+//! - `rt` (default): `qingke-rt` runtime and interrupt vectors.
+//! - `embassy`: the `embassy-time` driver on SysTick (CH592).
+//! - `exti`: built-in GPIO interrupt handlers for `exti::ExtiInput` (CH592).
+//! - `memory-x`: emit `memory.x` for the selected chip.
 
 #![no_std]
 #![allow(static_mut_refs)]

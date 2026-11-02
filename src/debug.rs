@@ -139,7 +139,7 @@ impl core::fmt::Write for SDIPrint {
 }
 
 /// `println!` over SDI that drops the message rather than spinning when the
-/// console is not armed. Use it in control loops; use [`println!`] when the
+/// console is not armed. Use it in control loops; use [`crate::println!`] when the
 /// console is known to be attached.
 #[macro_export]
 macro_rules! try_println {

@@ -4,21 +4,19 @@
 //! `MODE` bit 4), `STK_SR.CNTIF`, and the 32-bit `STK_CNTL` / `STK_CMPLR` pair.
 //! There is no free-running 64-bit counter.
 //!
-//! The counter is started **once** by [`init`] and left running; each delay
-//! only reads `STK_CNT` and compares it against a target.
+//! The counter is started **once** by [`crate::init`] and left running; each
+//! delay only reads `STK_CNT` and compares it against a target. The embassy
+//! time driver shares the same counter.
 //!
-//! # Why the rate is measured, not assumed
+//! # Counter rate
 //!
-//! The system clock comes out of reset configured by the boot ROM, not by the
-//! documented `CLK_CFG` reset value: on the CH585 measured here `CLK_CFG` reads
-//! `0x014D` (`CLK_SYS_MOD = 01`, i.e. PLL-sourced) rather than `0x0003`. The
-//! PLL divider therefore cannot be turned into a frequency without modelling
-//! the PLL, and a wrong constant makes every delay wrong by the same factor.
-//!
-//! So [`init`] calibrates the counter against the *independent* 32 kHz RTC
-//! counter instead. That is the same trick WCH's `OSC_CAL` uses, and it stays
-//! correct whatever the boot ROM left the PLL at. The calibrated value also
-//! backs [`crate::rcc::clocks`].
+//! - **CH592**: HCLK derives from the 32 MHz crystal, so [`crate::rcc`]
+//!   computes it exactly from `CLK_CFG` and the delay uses that.
+//! - **CH585**: the boot ROM leaves `CLK_CFG` PLL-sourced (`0x014D`, not the
+//!   documented `0x0003`), which cannot be turned into a frequency without
+//!   modelling the PLL. Init therefore calibrates the counter against the
+//!   *independent* 32 kHz RTC counter, the same trick WCH's `OSC_CAL` uses,
+//!   and the result also backs [`crate::rcc::clocks`].
 
 use core::sync::atomic::Ordering;
 
@@ -26,8 +24,8 @@ use crate::pac::SYSTICK;
 
 /// A delay backed by the SysTick counter.
 ///
-/// Requires [`crate::init`] (or [`init`]) to have run, so the counter is
-/// started and its rate is known.
+/// Requires [`crate::init`] to have run, so the counter is started and its
+/// rate is known.
 pub struct Delay;
 
 /// SysTick ticks per second, measured against the RTC at init.

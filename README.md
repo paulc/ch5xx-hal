@@ -22,6 +22,25 @@ Chip support is selected with a Cargo feature (`ch585`, `ch592`). Exactly one
 must be enabled. The chip feature also selects the QingKe core for `qingke` /
 `qingke-rt`. Pin singletons only exist for bonded pins; on CH592 that is the
 QFN32 (CH592X) set, PA4–PA15, PB0, PB4, PB6, PB7, PB10–PB15, PB22 and PB23.
+The QFN28 CH592F lacks PA6, PA7, PB0 and PB6, which still get singletons.
+
+## Building
+
+The HAL depends on sibling checkouts, not crates.io releases (yet):
+
+- `../ch5xx-data`, with the metapac generated (`./d gen`) into
+  `build/ch5xx-metapac`. CH592 needs the data fixes on its `ch592-ds-v1.9`
+  branch.
+- `../qingke`, for the `v3c`/`v4c` core features, which postdate qingke
+  0.8.2 (see the `[patch.crates-io]` blocks).
+
+Builds need nightly with `rust-src` (`-Zbuild-std=core`); the example crates
+set this up in `.cargo/config.toml`:
+
+```console
+cargo +nightly build -Zbuild-std=core --target riscv32imac-unknown-none-elf --release --features ch592
+cargo +nightly doc -Zbuild-std=core --target riscv32imac-unknown-none-elf --features ch592,embassy,exti --no-deps
+```
 
 ## Implemented so far
 
@@ -65,47 +84,64 @@ The CH5xx register model is not a CH32 one, so a few things look different:
 
 ## System clock
 
-The datasheet documents a 32 MHz `CLK_CFG` reset default, but the boot ROM does
-not leave it there: on the CH585 used for bring-up `CLK_CFG` reads `0x014D`
-(`CLK_SYS_MOD = 01`, PLL-sourced) and the actual system clock is
-**5,333,696 Hz**.
+- **CH592**: every HCLK source derives from the 32 MHz crystal, so the
+  frequency is computed exactly from `CLK_CFG`. The boot ROM leaves HSE / 5 =
+  6.4 MHz; `rcc::Config` presets select up to 60 MHz from the PLL (USB needs
+  the PLL, e.g. `SYSCLK_FREQ_60MHZ`).
+- **CH585**: the boot ROM leaves `CLK_CFG` PLL-sourced (`0x014D` rather than
+  the documented default; about 5.33 MHz on the bring-up part). Rather than
+  model the PLL, init measures SysTick against the RTC's independent 32 kHz
+  counter (the same idea as WCH's `OSC_CAL`) and reports the result through
+  `rcc::clocks()`. PLL setup is not implemented.
 
-Rather than model the PLL, `delay::init` measures SysTick against the RTC's
-independent 32 kHz counter at startup (the same idea as WCH's `OSC_CAL`) and
-publishes the result through `rcc::clocks()`. The measurement is deterministic
-across resets. PLL setup itself is not implemented.
+## Examples
 
-## Example
-
-`examples/ch585` blinks LED0 (PB16) and LED1 (PB17) in opposite phase:
+`examples/ch585` blinks LED0 (PB16) and LED1 (PB17) in opposite phase. Its
+runner is `probe-rs run --chip CH585`, which flashes, resets and streams
+`defmt` output in one step:
 
 ```console
 cd examples/ch585
 cargo run --release --bin blinky
 ```
 
-`examples/ch592` blinks the LED on PA8 of the WeAct CH592F core board (on the
-WCH EVT board, wire P2-18 (PA8) to P2-22 (LED0)). probe-rs has no CH59x target
-yet, so its runner is `wlink --chip CH59X --speed low flash`. Both options are
-required: wlink cannot auto-detect CH5xx parts, and at the default speed the
-probe fails to start the flash routine on CH592 (`protocol error: 0x55`).
+`examples/ch592` targets the WeAct CH592F core board (LED on PA8; on the WCH
+EVT board, wire P2-18 (PA8) to P2-22 (LED0)). probe-rs has no CH59x target
+yet, so the runner is `wlink --chip CH59X --speed low flash`. Both options
+are required: wlink cannot auto-detect CH5xx parts, and at the default speed
+the probe fails to start the flash routine on CH592 (`protocol error: 0x55`).
 
 The two-wire debug interface must first be enabled in the user config
-(`CFG_DEBUG_EN`, via `wchisp config enable-debug`). Note that on CH592 USB-ISP
+(`CFG_DEBUG_EN`, via `wchisp config enable-debug`). On CH592, USB-ISP
 flashing with `wchisp` fails verify while debug is enabled
 ([wchisp#93](https://github.com/ch32-rs/wchisp/issues/93)), so pick one or the
 other.
 
-The runner is `probe-rs run --chip CH585`, so `cargo run` flashes, resets, and
-streams `defmt` output in one step. A `wlink flash` runner is kept commented out
-in `.cargo/config.toml` if you only want to program the part.
+Besides `blinky`, `sdi_print`, `defmt_rtt` and `clocks` (which reports the
+clock registers), the CH592 examples are hardware tests that print
+`PASS`/`FAIL` lines over SDI print: `adc`, `embassy_time`, `exti`, `pwm`,
+`rtc`, `uart_loopback`, `wdg` (which resets the chip on purpose), and `spi`
+and `uart_async`, which need a PA14–PA15 jumper.
+`usb_cdc` is a CDC-ACM echo on the USB port; on macOS open
+`/dev/cu.usbmodem*` (the `tty.` node waits for carrier detect, which the
+class never reports). `i2c_scan` reports over UART1 TX (PA9).
+
+### PB14/PB15
+
+With `CFG_DEBUG_EN` set, PB14/PB15 belong to the debug link (TIO/TCK) and
+work as nothing else. The I2C pins have no alternate, so the I2C driver
+turns the debug interface off until reset
+(`debug::set_debug_interface_enabled`); the same call frees the pins for
+GPIO or SPI's alternate pins. The datasheet says only parts with a
+lot-number fifth digit of 1 or more implement it. Leave a delay after reset
+before calling it (as `i2c_scan` does) so the debugger can still attach.
 
 > **Careful when observing with a debugger:** every `wlink`/`probe-rs` memory
 > read halts the core and does not resume it, so polling a live counter will
 > freeze the firmware. Read state once after waiting, or record a history into
 > RAM and read it afterwards.
 
-## Console output (defmt + RTT)
+## Console output
 
 CH585 has no SDI printf (the debug-module `DATA0`/`DATA1` handshake is not
 present). CH592 has it, but wlink needs a one-line patch to use it; see
