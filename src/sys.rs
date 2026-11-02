@@ -14,12 +14,16 @@ use crate::pac;
 /// disabled throughout, as in WCH's `sys_safe_access_enable()`.
 #[allow(unused)]
 pub(crate) fn safe_access<R>(f: impl FnOnce() -> R) -> R {
-    critical_section::with(|_| {
+    // `fence.i` around the signature, as WCH's `SAFEOPERATE`.
+    critical_section::with(|_| unsafe {
         let sc = pac::SYSTEM_CONTROL;
+        core::arch::asm!("fence.i");
         sc.safe_access_sig().write(|w| w.set_safe_access_sig(0x57));
         sc.safe_access_sig().write(|w| w.set_safe_access_sig(0xa8));
+        core::arch::asm!("fence.i");
         let r = f();
         sc.safe_access_sig().write(|w| w.set_safe_access_sig(0));
+        core::arch::asm!("fence.i");
         r
     })
 }
