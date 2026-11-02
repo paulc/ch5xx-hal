@@ -41,12 +41,22 @@ fn main() {
     };
     println!("cargo:rustc-cfg={chip_name}");
 
-    // Per-chip GPIO port widths. The metadata does not carry pins yet (see
+    // Per-chip bonded GPIO pins. The metadata does not carry pins yet (see
     // ch5xx-data AGENTS.md, "Pins … are not in the SVD; leave them for hand
-    // editing"), and the widths differ per die, so they live here until pins
-    // land in the data.
-    let ports: &[(char, u8)] = match chip_name.as_str() {
-        "ch585" => &[('A', 16), ('B', 24)],
+    // editing"), and the bonded set differs per die, so it lives here until
+    // pins land in the data. Only listed pins get a singleton; for chips sold
+    // in several packages, list the largest package.
+    let ports: &[(char, &[u8])] = match chip_name.as_str() {
+        "ch585" => &[
+            ('A', &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]),
+            (
+                'B',
+                &[
+                    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+                    22, 23,
+                ],
+            ),
+        ],
         other => panic!("no GPIO port map for chip `{other}`"),
     };
 
@@ -70,8 +80,8 @@ fn main() {
 
     // One singleton per pin.
     let mut pins: Vec<(String, char, u8, u8)> = Vec::new();
-    for (port, width) in ports {
-        for n in 0..*width {
+    for (port, bonded) in ports {
+        for &n in *bonded {
             pins.push((format!("P{port}{n}"), *port, (*port as u8) - b'A', n));
         }
     }
