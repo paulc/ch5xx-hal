@@ -51,8 +51,11 @@ pub mod mode {
 
     /// Blocking mode.
     pub struct Blocking;
+    /// Async mode.
+    pub struct Async;
 
     impl_mode!(Blocking);
+    impl_mode!(Async);
 }
 
 pub mod rcc;
@@ -79,6 +82,8 @@ pub(crate) mod _generated {
 }
 
 pub use crate::_generated::{peripherals, Peripherals};
+
+pub(crate) mod sys;
 
 pub mod delay;
 pub mod gpio;
