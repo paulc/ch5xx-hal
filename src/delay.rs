@@ -62,8 +62,9 @@ impl Delay {
     ///
     /// # Safety
     ///
-    /// Must not be used alongside any other SysTick user (in particular an
-    /// embassy time driver).
+    /// Must run before the embassy time driver starts, and nothing else may
+    /// reset or reload the counter: the time driver shares it, using only the
+    /// compare register.
     pub(crate) unsafe fn init() {
         // Free-running, up-count, HCLK source (`STCLK` set — clearing it
         // would select HCLK/8). `STE` starts it.

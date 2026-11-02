@@ -85,6 +85,9 @@ pub use crate::_generated::{peripherals, Peripherals};
 
 pub(crate) mod sys;
 
+#[cfg(feature = "embassy")]
+pub mod embassy;
+
 pub mod delay;
 pub mod gpio;
 pub mod uart;
@@ -109,6 +112,9 @@ pub fn init(config: Config) -> Peripherals {
     unsafe {
         rcc::init(config.rcc);
         delay::init();
+
+        #[cfg(feature = "embassy")]
+        embassy::init();
     }
 
     critical_section::with(|cs| unsafe {
