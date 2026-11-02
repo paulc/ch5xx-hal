@@ -1,0 +1,30 @@
+[package]
+name = "ch592-examples"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ch5xx-hal = { path = "../../", features = ["ch592", "rt", "memory-x"] }
+
+panic-halt = "1.0"
+embedded-hal = "1.0.0"
+
+qingke = "0.8.2"
+qingke-rt = "0.8.2"
+defmt = "1.0"
+defmt-rtt = "1.3"
+
+[profile.release]
+strip = false   # symbols are not flashed to the microcontroller, so don't strip them.
+debug = 2       # defmt resolves log frames to file:line via DWARF; without it every line prints `<invalid location>`.
+lto = true
+opt-level = "s"
+
+[profile.dev]
+overflow-checks = false
+
+# Must match the HAL's `[patch]`: build against the local qingke checkout until
+# the release with the per-core features is on crates.io.
+[patch.crates-io]
+qingke = { path = "../../../qingke" }
+qingke-rt = { path = "../../../qingke/qingke-rt" }

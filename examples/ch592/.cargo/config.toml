@@ -1,0 +1,19 @@
+[build]
+target = "riscv32imac-unknown-none-elf"
+
+[target.riscv32imac-unknown-none-elf]
+# `probe-rs run` flashes, resets, and streams defmt over RTT in one step.
+# Swap back to `wlink flash` if you only want to program the part.
+# runner = "wlink flash"
+runner = "probe-rs run --chip CH592"
+rustflags = [
+    # Target features:
+    "-C",
+    "target-feature=+xwchc",
+]
+
+[unstable]
+build-std = ["core"]
+
+[env]
+DEFMT_LOG = "info"
