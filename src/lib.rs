@@ -10,8 +10,8 @@
 //! - **One GPIO block**, `pac::GPIO`, with per-port register groups
 //!   (`pa_out`, `pb_dir`, …) instead of one peripheral per port.
 //!
-//! [`rcc`] is a plain module rather than a driver directory: with no PLL setup
-//! implemented yet there is one frequency to report.
+//! [`rcc`] is a plain module rather than a driver directory: there is one
+//! clock (HCLK) to configure and report.
 
 #![no_std]
 #![allow(static_mut_refs)]

@@ -36,15 +36,19 @@ static TICKS_PER_SEC: core::sync::atomic::AtomicU32 =
 
 /// RTC block, whose `CNT_32K` counter is clocked by the independent 32 kHz
 /// oscillator and keeps running across anything the PLL does.
+#[cfg(not(ch592))]
 const RTC_BASE: u32 = 0x4000_1000;
 
 /// RTC count used for the calibration window. 1024 counts at 32.768 kHz is
 /// 31.25 ms — long enough for a precise ratio, short enough not to stall boot.
+#[cfg(not(ch592))]
 const CAL_COUNTS: u16 = 1024;
 
 /// RTC frequency, for turning counts into seconds.
+#[cfg(not(ch592))]
 const RTC_HZ: u32 = 32_768;
 
+#[cfg(not(ch592))]
 #[inline(always)]
 fn rtc_count() -> u16 {
     // `CNT_32K` is the 16-bit register at 0x38. It wraps every 2 s, but the
@@ -73,8 +77,14 @@ impl Delay {
             w.set_ste(true);
         });
 
+        // CH592: HCLK comes from the crystal and `rcc` computes it exactly.
+        // Calibrating against the 32 kHz RC would be ~5% off.
+        #[cfg(ch592)]
+        let hz = crate::rcc::clocks().sysclk.0;
+        #[cfg(not(ch592))]
         let hz = unsafe { calibrate() };
         TICKS_PER_SEC.store(hz, Ordering::Relaxed);
+        #[cfg(not(ch592))]
         crate::rcc::set_sysclk(hz);
     }
 
@@ -116,8 +126,12 @@ impl Delay {
 
 /// Measure SysTick against the RTC's 32 kHz counter.
 ///
+/// Only as accurate as the 32 kHz source: fine on the CH585 (see the module
+/// docs), unnecessary on the CH592, whose HCLK is known exactly.
+///
 /// Returns ticks per second, or the nominal frequency if the RTC never
 /// advances (it should always be running, but a hang here would brick boot).
+#[cfg(not(ch592))]
 unsafe fn calibrate() -> u32 {
     let rtc_start = rtc_count();
     let stk_start = SYSTICK.stk_cntl().read().cntl();
