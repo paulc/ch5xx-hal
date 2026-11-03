@@ -1,7 +1,7 @@
 //! Independent watchdog test. Results are reported over SDI print.
 //!
-//! First boot: start the IWDG with a 250 ms timeout, pet it for 2 s, then
-//! stop petting and print until it resets the chip. A marker in
+//! First boot: start the IWDG with a 250 ms timeout, feed it for 2 s, then
+//! stop feeding and print until it resets the chip. A marker in
 //! `R8_GLOB_RESET_KEEP` (kept across a watchdog reset) tells the second boot
 //! to report the reset cause.
 
@@ -43,7 +43,7 @@ fn main() -> ! {
         let mut wdg = IndependentWatchdog::new(p.IWDG, 1_000_000);
         loop {
             // Keep it fed in case the IWDG survived the reset.
-            wdg.pet();
+            wdg.feed();
             delay.delay_ms(100);
         }
     }
@@ -51,19 +51,19 @@ fn main() -> ! {
     let mut wdg = IndependentWatchdog::new(p.IWDG, 250_000);
     let cfg = pac::SYS.iwdg_cfg().read();
     hal::println!("IWDG cfg {:#010x}: pr {} rlr {}", cfg.0, cfg.pr(), cfg.rlr());
-    wdg.unleash();
+    wdg.start();
     delay.delay_ms(1);
     let running = pac::SYS.iwdg_cfg().read().iwdg_en();
-    hal::println!("{} IWDG running after unleash", if running { "PASS" } else { "FAIL" });
+    hal::println!("{} IWDG running after start", if running { "PASS" } else { "FAIL" });
 
     for _ in 0..20 {
         delay.delay_ms(100);
-        wdg.pet();
+        wdg.feed();
     }
-    hal::println!("PASS still alive after 2 s of petting every 100 ms");
+    hal::println!("PASS still alive after 2 s of feeding every 100 ms");
 
     sc.glob_reset_keep().write(|w| w.set_glob_reset_keep(MARKER));
-    hal::println!("stopped petting");
+    hal::println!("stopped feeding");
     let mut ms = 0;
     loop {
         delay.delay_ms(25);

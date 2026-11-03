@@ -1,8 +1,8 @@
 //! Independent watchdog (CH592)
 //!
-//! Follows embassy-stm32's `IndependentWatchdog`: [`IndependentWatchdog::new`]
-//! sets the timeout, [`unleash`](IndependentWatchdog::unleash) starts it and
-//! [`pet`](IndependentWatchdog::pet) reloads it. Like the STM32 IWDG it counts
+//! Follows the STM32 HALs' `IndependentWatchdog`: [`IndependentWatchdog::new`]
+//! sets the timeout, [`start`](IndependentWatchdog::start) starts it and
+//! [`feed`](IndependentWatchdog::feed) reloads it. Like the STM32 IWDG it counts
 //! the internal 32 kHz RC (LSI) down from a 12-bit reload through a /4../512
 //! prescaler, so timeouts run from 125 us to about 65 s, to the LSI's
 //! accuracy. Once started it cannot be stopped.
@@ -24,7 +24,7 @@ pub struct IndependentWatchdog<'d, T: Instance> {
 
 impl<'d, T: Instance> IndependentWatchdog<'d, T> {
     /// Set the timeout, in microseconds. The watchdog does not run until
-    /// [`unleash`](Self::unleash).
+    /// [`start`](Self::start).
     ///
     /// # Panics
     ///
@@ -55,12 +55,12 @@ impl<'d, T: Instance> IndependentWatchdog<'d, T> {
     }
 
     /// Start the watchdog.
-    pub fn unleash(&mut self) {
+    pub fn start(&mut self) {
         pac::SYS.iwdg_kr().write(|w| w.set_iwdg_kr(KEY_START));
     }
 
     /// Reload the counter.
-    pub fn pet(&mut self) {
+    pub fn feed(&mut self) {
         pac::SYS.iwdg_kr().write(|w| w.set_iwdg_kr(KEY_RELOAD));
     }
 }
