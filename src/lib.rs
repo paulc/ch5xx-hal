@@ -157,6 +157,11 @@ pub fn init(config: Config) -> Peripherals {
         embassy::init();
     }
 
+    #[cfg(feature = "rt")]
+    unsafe {
+        wake_on_pending_interrupts()
+    };
+
     critical_section::with(|cs| unsafe {
         gpio::init(cs);
         #[cfg(all(ch592, feature = "exti"))]
@@ -164,6 +169,23 @@ pub fn init(config: Config) -> Peripherals {
     });
 
     p
+}
+
+/// Let a pending interrupt end a `wfi` even while interrupts are masked.
+///
+/// qingke-rt turns on `PFIC_SCTLR.WFITOWFE` at startup, so `wfi` waits for an
+/// event, because QingKe's own `wfi` does not wake with `mstatus.MIE` clear,
+/// and embassy's `platform-riscv32` executor sleeps inside a critical
+/// section. But an interrupt is an event for WFE only once
+/// `PFIC_SCTLR.SEVONPEND` is set too: without it, an executor sleeping in
+/// that critical section never wakes (checked on CH592; likely
+/// ch32-rs/ch32-hal#201 too). An interrupt that becomes pending between the
+/// executor's check and its `wfi` latches the event, so it is not lost.
+#[cfg(feature = "rt")]
+unsafe fn wake_on_pending_interrupts() {
+    const PFIC_SCTLR: *mut u32 = 0xE000_ED10 as *mut u32;
+    const SEVONPEND: u32 = 1 << 4;
+    critical_section::with(|_| unsafe { PFIC_SCTLR.write_volatile(PFIC_SCTLR.read_volatile() | SEVONPEND) });
 }
 
 #[macro_export]
