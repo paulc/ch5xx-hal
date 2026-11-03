@@ -10,7 +10,7 @@
 //! part:
 //!
 //! ```console
-//! probe-rs run --chip CH592 target/riscv32imac-unknown-none-elf/release/defmt_rtt
+//! probe-rs run --chip CH592 target/riscv32imc-unknown-none-elf/release/defmt_rtt
 //! ```
 
 #![no_std]

@@ -163,6 +163,16 @@ cargo run --release --no-default-features --features platform-riscv32 --bin uart
 QingKe only because qingke-rt turns `wfi` into `wfe` and `init()` sets
 `PFIC_SCTLR.SEVONPEND`, making a pending (masked) interrupt a wake-up event.
 
+The CH592 examples build for `riscv32imc`, not `riscv32imac`, although the
+QingKe V4C core implements the A extension. Its AMOs hold, but an LR/SC loop
+(`compare_exchange`) loses updates when an interrupt writes the same word
+between the LR and the SC, and embassy's run queue is such a loop: a task
+woken by an interrupt while another task wakes a third can be dropped from the
+queue for good. Without A, embassy and the HAL (through `portable-atomic`)
+make atomic read-modify-writes in a critical section. `wake_race` checks this;
+built with `--target riscv32imac-unknown-none-elf` it fails. Applications on
+CH592 should use `riscv32imc` too.
+
 The examples enable the HAL's `highcode` feature, which runs interrupt entry
 and the functions placed in `.highcode` from RAM: CH592 flash runs code
 roughly ten times slower than RAM (an empty loop iteration takes 32 cycles).

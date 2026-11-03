@@ -9,7 +9,7 @@
 //!
 //! ```console
 //! wlink --chip CH59X --speed low flash --enable-sdi-print --watch-serial \
-//!     target/riscv32imac-unknown-none-elf/release/sdi_print
+//!     target/riscv32imc-unknown-none-elf/release/sdi_print
 //! ```
 //!
 //! `try_println!` is lossy: with nobody draining the console a message is
