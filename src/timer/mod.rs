@@ -5,7 +5,7 @@
 //! - `TMR0`..`TMR3`: 26-bit timers counting HCLK, each with **one** pin that is
 //!   either its PWM output or its capture input. [`simple_pwm::SimplePwm`]
 //!   drives the PWM output and [`input_capture::InputCapture`] measures the
-//!   input.
+//!   input (TMR1/TMR2 also by DMA).
 //! - `PWMX`: eight 8-bit PWM channels (PWM4-PWM11) on one shared counter and
 //!   prescaler, or six 16-bit ones (PWM4-PWM9). See [`pwmx`].
 //!
@@ -20,9 +20,12 @@
 //! also the RST# input: with `CFG_RESET_EN` set in the user config it is not
 //! usable as TMR0's pin.
 
+use core::marker::PhantomData;
+use core::sync::atomic::{compiler_fence, Ordering};
+
 use embassy_sync::waitqueue::AtomicWaker;
 
-use crate::{pac, peripherals};
+use crate::{interrupt, pac, peripherals};
 
 pub mod input_capture;
 pub mod pwmx;
@@ -55,7 +58,30 @@ pub trait Instance: embassy_hal_internal::PeripheralType + SealedInstance + 'sta
     type Interrupt: crate::interrupt::typelevel::Interrupt;
 }
 
+pub(crate) trait SealedDmaInstance {
+    /// The full register block, with the DMA registers.
+    fn dma_regs() -> pac::tmr::TmrFull;
+}
+
+/// A `TMRx` timer with DMA: TMR1 and TMR2.
+#[allow(private_bounds)]
+pub trait DmaInstance: Instance + SealedDmaInstance {}
+
 pin_trait!(TimerPin, Instance);
+
+/// Timer interrupt handler, for the async [`input_capture::InputCapture`].
+pub struct InterruptHandler<T: Instance> {
+    _phantom: PhantomData<T>,
+}
+
+impl<T: Instance> interrupt::typelevel::Handler<T::Interrupt> for InterruptHandler<T> {
+    unsafe fn on_interrupt() {
+        // Mask everything; the driver re-enables what it waits for.
+        T::regs().inter_en().write(|_| {});
+        compiler_fence(Ordering::SeqCst);
+        T::waker().wake();
+    }
+}
 
 mod ch592 {
     use super::*;
@@ -98,6 +124,21 @@ mod ch592 {
     impl_timer!(TMR1, Tmr1, Some(RemapGroup::Tmr1));
     impl_timer!(TMR2, Tmr2, Some(RemapGroup::Tmr2));
     impl_timer!(TMR3, Tmr3, None);
+
+    macro_rules! impl_dma_timer {
+        ($inst:ident) => {
+            impl SealedDmaInstance for peripherals::$inst {
+                fn dma_regs() -> pac::tmr::TmrFull {
+                    pac::$inst
+                }
+            }
+
+            impl DmaInstance for peripherals::$inst {}
+        };
+    }
+
+    impl_dma_timer!(TMR1);
+    impl_dma_timer!(TMR2);
 
     pin_trait_impl!(crate::timer::TimerPin, TMR0, PA9, 0);
     pin_trait_impl!(crate::timer::TimerPin, TMR0, PB23, 1);

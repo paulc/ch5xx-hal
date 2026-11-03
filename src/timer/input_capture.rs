@@ -30,6 +30,15 @@
 //! measurement too. Reading keeps up with about one measurement per 500 HCLK
 //! cycles (tested at 60 MHz, from flash); faster signals overrun.
 //!
+//! # DMA (TMR1, TMR2)
+//!
+//! [`InputCapture::read_dma`] moves raw FIFO entries into a RAM buffer, and
+//! [`InputCapture::decode`] turns them into measurements. It keeps up with
+//! levels a few tens of HCLK cycles long (tested with levels of 30 cycles on
+//! average), where reading the FIFO needs about 500. The DMA takes the entries already queued first, and
+//! capture carries on into the FIFO afterwards, so DMA and FIFO reads can be
+//! mixed: they form one stream.
+//!
 //! Pins are in the [module table](super#timer-pins-ch592).
 
 use core::future::poll_fn;
@@ -37,7 +46,10 @@ use core::marker::PhantomData;
 use core::sync::atomic::{compiler_fence, Ordering};
 use core::task::Poll;
 
-use super::{Instance, TimerPin};
+use embassy_hal_internal::drop::OnDrop;
+
+pub use super::InterruptHandler;
+use super::{DmaInstance, Instance, TimerPin};
 use crate::gpio::{AfType, AnyPin, Pull};
 use crate::interrupt::typelevel::Interrupt as _;
 use crate::mode::{Async, Blocking, Mode};
@@ -53,6 +65,9 @@ const FIFO_SIZE: u8 = 8;
 /// Bit 25 of a FIFO entry: the level (`BothEdges`) or a timeout (`Rising`,
 /// `Falling`).
 const FLAG: u32 = 1 << 25;
+
+/// The RAM the timer DMA reaches: its address registers hold 15 bits.
+const DMA_WINDOW: core::ops::Range<usize> = 0x2000_0000..0x2000_8000;
 
 /// Which edges a measurement runs between.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -118,7 +133,7 @@ pub enum Error {
     Overrun,
 }
 
-/// The timer's pin, as a capture input.
+/// The timer's pin, as a capture (or count) input.
 pub struct CapturePin<'d, T> {
     _pin: Peri<'d, AnyPin>,
     phantom: PhantomData<T>,
@@ -136,17 +151,49 @@ impl<'d, T: Instance> CapturePin<'d, T> {
     }
 }
 
-/// Timer interrupt handler, for the async [`InputCapture`].
-pub struct InterruptHandler<T: Instance> {
-    _phantom: PhantomData<T>,
+/// Turns FIFO entries into measurements.
+struct Decoder {
+    config: Config,
+    /// Timeout ticks waiting to join the next measurement.
+    pending: u32,
+    /// Drop the next measurement (it started part-way).
+    skip: bool,
 }
 
-impl<T: Instance> interrupt::typelevel::Handler<T::Interrupt> for InterruptHandler<T> {
-    unsafe fn on_interrupt() {
-        // Mask everything; `read` re-enables what it waits for.
-        T::regs().inter_en().write(|_| {});
-        compiler_fence(Ordering::SeqCst);
-        T::waker().wake();
+impl Decoder {
+    /// Start afresh: the next measurement is partial.
+    fn resync(&mut self) {
+        self.pending = 0;
+        self.skip = true;
+    }
+
+    /// Decode one entry; `None` if it gives no result (a dropped partial
+    /// measurement).
+    #[inline(always)]
+    fn push(&mut self, entry: u32) -> Option<Result<Capture, Error>> {
+        let ticks = entry & MAX_TIMEOUT;
+        let flag = entry & FLAG != 0;
+        // In `BothEdges` mode the flag is the level, so a timeout shows only
+        // as a full `CNT_END` of ticks.
+        let timeout = match self.config.mode {
+            InputCaptureMode::BothEdges => ticks == self.config.timeout,
+            _ => flag,
+        };
+        let total = self.pending.saturating_add(ticks);
+        if timeout {
+            self.pending = total;
+            return Some(Err(Error::Timeout));
+        }
+        self.pending = 0;
+        if self.skip {
+            self.skip = false;
+            return None;
+        }
+        Some(Ok(match self.config.mode {
+            InputCaptureMode::BothEdges if flag => Capture::High(total),
+            InputCaptureMode::BothEdges => Capture::Low(total),
+            _ => Capture::Period(total),
+        }))
     }
 }
 
@@ -154,11 +201,7 @@ impl<T: Instance> interrupt::typelevel::Handler<T::Interrupt> for InterruptHandl
 pub struct InputCapture<'d, T: Instance, M: Mode> {
     _peri: Peri<'d, T>,
     _pin: CapturePin<'d, T>,
-    config: Config,
-    /// Timeout ticks waiting to join the next measurement.
-    pending: u32,
-    /// Drop the next measurement (it started part-way).
-    skip: bool,
+    decoder: Decoder,
     _phantom: PhantomData<M>,
 }
 
@@ -226,6 +269,61 @@ impl<'d, T: Instance> InputCapture<'d, T, Async> {
     }
 }
 
+impl<'d, T: DmaInstance> InputCapture<'d, T, Async> {
+    /// Fill `buf` with the next `buf.len()` raw FIFO entries by DMA, waiting
+    /// on the timer interrupt; then [`decode`](Self::decode) them.
+    ///
+    /// Dropping the future stops the DMA; the measurements it had moved are
+    /// lost and the next one is dropped.
+    ///
+    /// # Panics
+    ///
+    /// If `buf` is empty or outside the first 32 KiB of RAM (the DMA's
+    /// reach), for instance in flash.
+    pub async fn read_dma(&mut self, buf: &mut [u32]) -> Result<(), Error> {
+        self.check_overrun(T::regs().fifo_count().read().fifo_count())?;
+        let end = start_dma::<T>(buf);
+        let decoder = &mut self.decoder;
+        let guard = OnDrop::new(|| {
+            stop_dma::<T>();
+            decoder.resync();
+        });
+        poll_fn(|cx| {
+            T::waker().register(cx.waker());
+            let r = T::dma_regs();
+            if dma_done::<T>(end) {
+                return Poll::Ready(());
+            }
+            r.inter_en().write(|w| w.set_ie_dma_end(true));
+            if dma_done::<T>(end) {
+                r.inter_en().write(|_| {});
+                return Poll::Ready(());
+            }
+            Poll::Pending
+        })
+        .await;
+        guard.defuse();
+        stop_dma::<T>();
+        Ok(())
+    }
+}
+
+impl<'d, T: DmaInstance, M: Mode> InputCapture<'d, T, M> {
+    /// Fill `buf` with the next `buf.len()` raw FIFO entries by DMA,
+    /// polling; then [`decode`](Self::decode) them.
+    ///
+    /// # Panics
+    ///
+    /// As [`read_dma`](InputCapture::read_dma).
+    pub fn blocking_read_dma(&mut self, buf: &mut [u32]) -> Result<(), Error> {
+        self.check_overrun(T::regs().fifo_count().read().fifo_count())?;
+        let end = start_dma::<T>(buf);
+        while !dma_done::<T>(end) {}
+        stop_dma::<T>();
+        Ok(())
+    }
+}
+
 impl<'d, T: Instance, M: Mode> InputCapture<'d, T, M> {
     fn new_inner(tim: Peri<'d, T>, pin: CapturePin<'d, T>, config: Config) -> Self {
         if !(1..=MAX_TIMEOUT).contains(&config.timeout) {
@@ -235,9 +333,11 @@ impl<'d, T: Instance, M: Mode> InputCapture<'d, T, M> {
         let mut this = Self {
             _peri: tim,
             _pin: pin,
-            config,
-            pending: 0,
-            skip: true,
+            decoder: Decoder {
+                config,
+                pending: 0,
+                skip: true,
+            },
             _phantom: PhantomData,
         };
         this.restart();
@@ -248,23 +348,31 @@ impl<'d, T: Instance, M: Mode> InputCapture<'d, T, M> {
     /// dropped, as after [`new`](InputCapture::new).
     pub fn restart(&mut self) {
         let r = T::regs();
+        let mode = self.decoder.config.mode;
+        let cap_edge = match mode {
+            InputCaptureMode::BothEdges => 0b01,
+            InputCaptureMode::Falling => 0b10,
+            InputCaptureMode::Rising => 0b11,
+        };
         r.inter_en().write(|_| {});
-        r.ctrl_mod().write(|w| w.set_all_clear(true));
+        // Select capture mode while the timer is held clear: a DMA (TMR1,
+        // TMR2) enabled in PWM mode reads from RAM instead and, with the FIFO
+        // held clear, stalls the bus (seen on CH592).
+        r.ctrl_mod().write(|w| {
+            w.set_all_clear(true);
+            w.set_mode_in(true);
+            w.set_cap_edge(cap_edge);
+        });
         r.pwm_mod().write(|_| {});
         // Writing `CNT_END` also clears the count.
-        r.cnt_end().write(|w| w.set_cnt_end(self.config.timeout));
+        r.cnt_end().write(|w| w.set_cnt_end(self.decoder.config.timeout));
         r.int_flag().write(|w| w.0 = 0xff);
         r.ctrl_mod().write(|w| {
             w.set_mode_in(true);
-            w.set_cap_edge(match self.config.mode {
-                InputCaptureMode::BothEdges => 0b01,
-                InputCaptureMode::Falling => 0b10,
-                InputCaptureMode::Rising => 0b11,
-            });
+            w.set_cap_edge(cap_edge);
             w.set_count_en(true);
         });
-        self.pending = 0;
-        self.skip = true;
+        self.decoder.resync();
     }
 
     /// The tick rate: HCLK.
@@ -274,7 +382,7 @@ impl<'d, T: Instance, M: Mode> InputCapture<'d, T, M> {
 
     /// The configuration in use.
     pub fn config(&self) -> &Config {
-        &self.config
+        &self.decoder.config
     }
 
     /// The next measurement if there is one.
@@ -294,12 +402,38 @@ impl<'d, T: Instance, M: Mode> InputCapture<'d, T, M> {
         }
     }
 
+    /// Decode raw entries from [`read_dma`](InputCapture::read_dma), in the
+    /// order they were read and each buffer once: timeouts and the partial
+    /// measurement carry over between buffers and the FIFO reads.
+    pub fn decode<'a>(&'a mut self, raw: &'a [u32]) -> impl Iterator<Item = Result<Capture, Error>> + 'a {
+        let decoder = &mut self.decoder;
+        raw.iter().filter_map(move |&entry| decoder.push(entry))
+    }
+
     fn has_data() -> bool {
         T::regs().fifo_count().read().fifo_count() > 0
     }
 
+    /// If the FIFO overflowed, empty it and report it. An overflow leaves
+    /// the FIFO full until the next read, so `count` (the FIFO count) tells
+    /// whether the flag needs checking.
+    fn check_overrun(&mut self, count: u8) -> Result<(), Error> {
+        let r = T::regs();
+        if count >= FIFO_SIZE && r.int_flag().read().if_fifo_ov() {
+            // Entries were overwritten: drop what is left.
+            while r.fifo_count().read().fifo_count() > 0 {
+                r.fifo().read();
+            }
+            r.int_flag().write(|w| w.set_if_fifo_ov(true));
+            self.decoder.resync();
+            return Err(Error::Overrun);
+        }
+        Ok(())
+    }
+
     /// Decode FIFO entries until one gives a result; `Err(())` if the FIFO
-    /// runs dry first.
+    /// runs dry first. This is the polling hot path: one count read per
+    /// entry.
     fn poll(&mut self) -> Result<Result<Capture, Error>, ()> {
         let r = T::regs();
         loop {
@@ -307,42 +441,13 @@ impl<'d, T: Instance, M: Mode> InputCapture<'d, T, M> {
             if count == 0 {
                 return Err(());
             }
-            // An overflow leaves the FIFO full until the next read, so the
-            // flag needs checking only then.
-            if count >= FIFO_SIZE && r.int_flag().read().if_fifo_ov() {
-                // Entries were overwritten: drop what is left.
-                while r.fifo_count().read().fifo_count() > 0 {
-                    r.fifo().read();
-                }
-                r.int_flag().write(|w| w.set_if_fifo_ov(true));
-                self.pending = 0;
-                self.skip = true;
-                return Ok(Err(Error::Overrun));
+            if let Err(e) = self.check_overrun(count) {
+                return Ok(Err(e));
             }
             let entry = r.fifo().read().fifo();
-            let ticks = entry & MAX_TIMEOUT;
-            let flag = entry & FLAG != 0;
-            // In `BothEdges` mode the flag is the level, so a timeout shows
-            // only as a full `CNT_END` of ticks.
-            let timeout = match self.config.mode {
-                InputCaptureMode::BothEdges => ticks == self.config.timeout,
-                _ => flag,
-            };
-            let total = self.pending.saturating_add(ticks);
-            if timeout {
-                self.pending = total;
-                return Ok(Err(Error::Timeout));
+            if let Some(result) = self.decoder.push(entry) {
+                return Ok(result);
             }
-            self.pending = 0;
-            if self.skip {
-                self.skip = false;
-                continue;
-            }
-            return Ok(Ok(match self.config.mode {
-                InputCaptureMode::BothEdges if flag => Capture::High(total),
-                InputCaptureMode::BothEdges => Capture::Low(total),
-                _ => Capture::Period(total),
-            }));
         }
     }
 }
@@ -353,4 +458,38 @@ impl<'d, T: Instance, M: Mode> Drop for InputCapture<'d, T, M> {
         r.inter_en().write(|_| {});
         r.ctrl_mod().write(|w| w.set_all_clear(true));
     }
+}
+
+/// Point the DMA at `buf` and start it; returns the `DMA_END` value.
+fn start_dma<T: DmaInstance>(buf: &mut [u32]) -> u16 {
+    let start = buf.as_mut_ptr() as usize;
+    let end = start + 4 * buf.len();
+    if buf.is_empty() || !DMA_WINDOW.contains(&start) || end > DMA_WINDOW.end {
+        panic!("capture DMA buffer must be in the first 32 KiB of RAM");
+    }
+    let r = T::dma_regs();
+    r.ctrl_dma().write(|_| {});
+    r.int_flag().write(|w| w.set_if_dma_end(true));
+    // The address fields count words from bit 2: write byte addresses whole.
+    r.dma_beg().write(|w| w.0 = start as u16 & 0x7ffc);
+    r.dma_end().write(|w| w.0 = end as u16 & 0x7ffc);
+    compiler_fence(Ordering::SeqCst);
+    r.ctrl_dma().write(|w| w.set_dma_enable(true));
+    end as u16 & 0x7ffc
+}
+
+fn dma_done<T: DmaInstance>(end: u16) -> bool {
+    T::dma_regs().dma_now().read().0 == end
+}
+
+/// Stop the DMA and clear its end flag (moving `DMA_END` off `DMA_NOW`
+/// first, as the datasheet says).
+fn stop_dma<T: DmaInstance>() {
+    let r = T::dma_regs();
+    r.ctrl_dma().write(|_| {});
+    compiler_fence(Ordering::SeqCst);
+    r.inter_en().modify(|w| w.set_ie_dma_end(false));
+    let now = r.dma_now().read().0;
+    r.dma_end().write(|w| w.0 = now.wrapping_add(0x100) & 0x7ffc);
+    r.int_flag().write(|w| w.set_if_dma_end(true));
 }

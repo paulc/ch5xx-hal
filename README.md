@@ -81,14 +81,14 @@ been checked on a WeAct CH592F board by the test examples in `examples/ch592`.
 | `spi` | SPI0 master, blocking and async, `embedded-hal(-async)` | yes (alternate pins PB12-PB15 untested) |
 | `adc` | single-ended and differential, PGA, calibration, temperature, VBAT | yes |
 | `timer::simple_pwm` | `SimplePwm` on TMR0-3 | yes (TMR1/TMR2 remap pins untested) |
-| `timer::input_capture` | `InputCapture` on TMR0-3: period or high/low times, blocking and async | yes |
+| `timer::input_capture` | `InputCapture` on TMR0-3: period or high/low times, blocking and async; DMA on TMR1/TMR2 | yes |
 | `timer::pwmx` | 8/16-bit PWMX channels 4-11 | yes |
 | `rtc` | counter, alarm, periodic flag, LSI or LSE, LSI calibration | yes |
 | `wdg` | `IndependentWatchdog` (IWDG) | yes |
 | `i2c` | I2C0 master, blocking and async, `embedded-hal(-async)`; on PB15/PB14, so it turns the debug interface off | yes (bus scan) |
 | `usb` | full-speed device for `embassy-usb` | yes (CDC-ACM echo; stall and remote wakeup untested) |
 
-Not implemented: BLE, low-power modes, timer count mode and DMA, CH585
+Not implemented: BLE, low-power modes, timer count mode and PWM DMA, CH585
 peripherals.
 
 ## What differs from CH32

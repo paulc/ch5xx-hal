@@ -12,12 +12,18 @@
 //!   output, which checks their pin routing and the timeout of an input held
 //!   low. PB10/PB11 are the USB pins; the pulses are far shorter than a USB
 //!   host's attach debounce.
+//! - DMA (TMR1, TMR2): an async DMA keeps up with a GPIO toggle loop whose
+//!   levels are far too short for polling, a blocking DMA drains the
+//!   entries already queued, and dropping `read_dma` stops the DMA.
 
 #![no_std]
 #![no_main]
 
 use ch5xx_hal as hal;
 use embassy_executor::Spawner;
+use embassy_futures::join::join;
+use embassy_futures::select::{select, Either};
+use embassy_time::Timer;
 use hal::debug::SDIPrint;
 use hal::delay::Delay;
 use hal::gpio::Pull;
@@ -28,7 +34,8 @@ use hal::{bind_interrupts, pac, peripherals};
 use panic_halt as _;
 
 bind_interrupts!(struct Irqs {
-    TMR0 => hal::timer::input_capture::InterruptHandler<peripherals::TMR0>;
+    TMR0 => hal::timer::InterruptHandler<peripherals::TMR0>;
+    TMR1 => hal::timer::InterruptHandler<peripherals::TMR1>;
 });
 
 const N: usize = 100;
@@ -127,6 +134,12 @@ fn all_near(got: &[Result<Capture, Error>], mode: InputCaptureMode, want: u32) -
         }
     }
     (ok && seen > 0, worst)
+}
+
+fn dump_raw(raw: &[u32]) {
+    for v in raw {
+        hal::println!("    {:#010x}", v);
+    }
 }
 
 fn dump(got: &[Result<Capture, Error>]) {
@@ -346,6 +359,124 @@ async fn main(_spawner: Spawner) -> ! {
         let r = cap.blocking_read();
         c.check("Rising, input held low: timeout", r == Err(Error::Timeout), 0);
         g.pb_dir().modify(|w| w.0 &= !(1 << 22));
+    }
+
+    // ---- DMA. A toggle loop with no delay: levels of a few cycles each.
+    let toggle_fast = |bit: usize, n: u32| {
+        for _ in 0..n {
+            g.pb_out().modify(|w| w.0 |= 1 << bit);
+            g.pb_clr().write(|w| w.0 = 1 << bit);
+        }
+    };
+    let mut raw = [0u32; 48];
+    {
+        let pin = CapturePin::new::<1>(p.PB10.reborrow(), Pull::None);
+        let mut cap = InputCapture::new(
+            p.TMR1.reborrow(),
+            pin,
+            Irqs,
+            config(InputCaptureMode::BothEdges, 60_000),
+        );
+        drive(10, false);
+        g.pb_dir().modify(|w| w.0 |= 1 << 10);
+        cap.restart();
+        // 40 edges, then 1 ms timeouts until the buffer is full.
+        let t0 = now();
+        let (r, ()) = join(cap.read_dma(&mut raw), async { toggle_fast(10, 20) }).await;
+        let dt = now().wrapping_sub(t0);
+        let mut levels = 0u32;
+        let mut sum = 0u32;
+        let mut alternating = true;
+        let mut last_high = None;
+        let mut timeouts = 0;
+        for m in cap.decode(&raw) {
+            match m {
+                Ok(c) => {
+                    let high = matches!(c, Capture::High(_));
+                    alternating &= last_high != Some(high);
+                    last_high = Some(high);
+                    levels += 1;
+                    sum += c.ticks();
+                }
+                Err(Error::Timeout) => timeouts += 1,
+                Err(_) => alternating = false,
+            }
+        }
+        hal::println!(
+            "DMA TMR1: {} levels totalling {} ticks, {} timeouts, {} ticks overall",
+            levels,
+            sum,
+            timeouts,
+            dt
+        );
+        c.check(
+            "DMA keeps up with 40 fast edges: 39 alternating levels",
+            r.is_ok() && levels == 39 && alternating,
+            levels as i64,
+        );
+        c.check("  then timeouts fill the buffer", timeouts == 48 - 40, timeouts as i64);
+        c.check(
+            "  shortest level a few cycles (average ticks)",
+            sum / 39 < 100,
+            (sum / 39) as i64,
+        );
+        if levels != 39 {
+            dump_raw(&raw);
+        }
+
+        // The same signal, polled: overruns.
+        cap.restart();
+        toggle_fast(10, 20);
+        let n = collect(&mut cap, &mut got[..20]);
+        c.check(
+            "polling the same signal overruns",
+            got[..n].iter().any(|r| *r == Err(Error::Overrun)),
+            n as i64,
+        );
+
+        // Dropping `read_dma` stops the DMA (no edges: it would take 48 ms).
+        cap.restart();
+        let r = select(cap.read_dma(&mut raw), Timer::after_millis(2)).await;
+        let stopped = !pac::TMR1.ctrl_dma().read().dma_enable();
+        c.check(
+            "dropped read_dma stops the DMA",
+            matches!(r, Either::Second(())) && stopped,
+            0,
+        );
+        g.pb_dir().modify(|w| w.0 &= !(1 << 10));
+    }
+    {
+        // Blocking DMA on TMR2, draining 6 queued entries then 2 timeouts.
+        let pin = CapturePin::new::<1>(p.PB11.reborrow(), Pull::None);
+        let mut cap = InputCapture::new_blocking(p.TMR2.reborrow(), pin, config(InputCaptureMode::BothEdges, 60_000));
+        drive(11, false);
+        g.pb_dir().modify(|w| w.0 |= 1 << 11);
+        cap.restart();
+        for i in 0..6 {
+            delay.delay_us(50);
+            drive(11, i % 2 == 0);
+        }
+        let queued = pac::TMR2.fifo_count().read().fifo_count();
+        let r = cap.blocking_read_dma(&mut raw[..8]);
+        let mut n = 0;
+        let mut ok = r.is_ok();
+        for (i, m) in cap.decode(&raw[..8]).enumerate() {
+            n += 1;
+            ok &= match (i, m) {
+                (0 | 2 | 4, Ok(Capture::High(t))) | (1 | 3, Ok(Capture::Low(t))) => (3000..4000).contains(&t),
+                (5 | 6, Err(Error::Timeout)) => true,
+                _ => false,
+            };
+        }
+        c.check(
+            "blocking DMA on TMR2: 6 queued entries, then timeouts",
+            queued == 6 && ok && n == 7,
+            n,
+        );
+        if !ok {
+            dump_raw(&raw[..8]);
+        }
+        g.pb_dir().modify(|w| w.0 &= !(1 << 11));
     }
 
     hal::println!("capture: {} passed, {} failed", c.pass, c.fail);
