@@ -74,7 +74,7 @@ been checked on a WeAct CH592F board by the test examples in `examples/ch592`.
 
 | Module | Driver | HW |
 | ------ | ------ | -- |
-| `debug` | SDI print (`println!` over the debug link) | yes |
+| `debug` | SDI print (`println!` over the debug link; `sdi_writeln!` for raw bytes) | yes |
 | `embassy` | `embassy-time` driver on SysTick (feature `embassy`) | yes |
 | `exti` | `ExtiInput` pin interrupts, async edge/level waits (feature `exti`) | yes |
 | `uart` | UART0-3, blocking and async, `embedded-io(-async)` | yes |

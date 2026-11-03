@@ -15,6 +15,10 @@
 //! `try_println!` is lossy: with nobody draining the console a message is
 //! dropped after a short wait instead of hanging, and the LED (PA8 on the
 //! WeAct board) keeps blinking either way.
+//!
+//! `sdi_writeln!` writes raw bytes with no formatting. It too gives up when
+//! nobody drains the console, and then stays silent until the next
+//! `SDIPrint::enable()`.
 
 #![no_std]
 #![no_main]
@@ -36,6 +40,8 @@ fn main() -> ! {
 
     loop {
         hal::try_println!("ch592 sdi print {} (sysclk {} Hz)", n, hal::rcc::clocks().sysclk.0);
+        let word = if n % 2 == 0 { b"tick" } else { b"tock" };
+        hal::sdi_writeln!(b"raw:", b"no", b"formatting", word);
         led.toggle();
         n = n.wrapping_add(1);
         delay.delay_ms(500);

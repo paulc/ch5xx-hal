@@ -23,6 +23,16 @@ pub struct SDIPrint;
 #[cfg(ch592)]
 const SPINS: u32 = 20_000;
 
+/// Polls [`sdi_write`] allows per chunk before deciding no debugger is
+/// draining the console. Paid once: the verdict sticks until
+/// [`SDIPrint::enable`].
+#[cfg(ch592)]
+const SPIN_LIMIT: u32 = 100_000;
+
+/// Cleared by [`sdi_write`] when the debugger stops draining the console.
+#[cfg(ch592)]
+static SDI_ALIVE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(true);
+
 #[cfg(ch592)]
 mod imp {
     use qingke::dm::{DATA0, DATA1};
@@ -42,34 +52,66 @@ mod imp {
         unsafe { core::ptr::read_volatile(DEBUG_DATA0_ADDRESS) != 0 }
     }
 
-    pub(super) fn write(s: &str, spins: Option<u32>) -> core::fmt::Result {
+    /// Hand one chunk of at most 7 bytes to the debugger.
+    #[inline]
+    fn put(chunk: &[u8]) {
         let mut data = [0u8; 8];
+        data[1..chunk.len() + 1].copy_from_slice(chunk);
+        data[0] = chunk.len() as u8;
+
+        // data1 is the last 4 bytes of data
+        let data1 = u32::from_le_bytes(data[4..].try_into().unwrap());
+        let data0 = u32::from_le_bytes(data[..4].try_into().unwrap());
+
+        unsafe {
+            core::ptr::write_volatile(DEBUG_DATA1_ADDRESS, data1);
+            core::ptr::write_volatile(DEBUG_DATA0_ADDRESS, data0);
+        }
+    }
+
+    /// Wait up to `limit` polls for the previous chunk to drain.
+    #[inline]
+    fn wait(limit: u32) -> bool {
+        let mut waited = 0u32;
+        while is_busy() {
+            waited += 1;
+            if waited > limit {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub(super) fn write(s: &str, spins: Option<u32>) -> core::fmt::Result {
         for chunk in s.as_bytes().chunks(7) {
-            data[1..chunk.len() + 1].copy_from_slice(chunk);
-            data[0] = chunk.len() as u8;
-
-            // data1 is the last 4 bytes of data
-            let data1 = u32::from_le_bytes(data[4..].try_into().unwrap());
-            let data0 = u32::from_le_bytes(data[..4].try_into().unwrap());
-
-            let mut waited = 0u32;
-            while is_busy() {
-                if let Some(limit) = spins {
-                    waited += 1;
-                    if waited > limit {
+            match spins {
+                Some(limit) => {
+                    if !wait(limit) {
                         return Ok(());
                     }
                 }
+                None => while is_busy() {},
             }
-
-            unsafe {
-                core::ptr::write_volatile(DEBUG_DATA1_ADDRESS, data1);
-                core::ptr::write_volatile(DEBUG_DATA0_ADDRESS, data0);
-            }
+            put(chunk);
         }
 
         Ok(())
     }
+
+    pub(super) fn write_raw(bytes: &[u8]) {
+        if !super::SDI_ALIVE.load(Relaxed) {
+            return;
+        }
+        for chunk in bytes.chunks(7) {
+            if !wait(super::SPIN_LIMIT) {
+                super::SDI_ALIVE.store(false, Relaxed);
+                return;
+            }
+            put(chunk);
+        }
+    }
+
+    use core::sync::atomic::Ordering::Relaxed;
 }
 
 #[cfg(not(ch592))]
@@ -84,11 +126,16 @@ mod imp {
     pub(super) fn write(_s: &str, _spins: Option<u32>) -> core::fmt::Result {
         Ok(())
     }
+
+    pub(super) fn write_raw(_bytes: &[u8]) {}
 }
 
 impl SDIPrint {
-    /// Arm the console. Call once before printing.
+    /// Arm the console. Call once before printing. Also re-arms
+    /// [`sdi_write`] after it has given up.
     pub fn enable() {
+        #[cfg(ch592)]
+        SDI_ALIVE.store(true, core::sync::atomic::Ordering::Relaxed);
         imp::enable()
     }
 
@@ -110,6 +157,19 @@ impl SDIPrint {
         #[cfg(not(ch592))]
         return imp::write(s, None);
     }
+}
+
+/// Write raw bytes to the console, with no formatting.
+///
+/// Never blocks for long: if a chunk is still waiting for the debugger after
+/// 100 000 polls, the rest is dropped and every later
+/// call returns at once, until [`SDIPrint::enable`] re-arms it. So a debugger
+/// that attaches after that sees nothing from `sdi_write`; the
+/// [`crate::println!`] family is unaffected.
+///
+/// Discards everything on CH585 (see the [module docs](self)).
+pub fn sdi_write(bytes: &[u8]) {
+    imp::write_raw(bytes)
 }
 
 /// Writer that routes formatting through [`SDIPrint::write_str_lossy`], so a
@@ -146,6 +206,26 @@ macro_rules! try_println {
     ($($arg:tt)*) => {
         {
             let _ = $crate::debug::write_fmt_lossy(format_args!($($arg)*));
+        }
+    };
+}
+
+/// Write each argument (`&[u8]`) with [`debug::sdi_write`](crate::debug::sdi_write),
+/// each followed by a space, then a newline. No formatting, so it costs
+/// little code and time:
+///
+/// ```ignore
+/// sdi_writeln!(b"adc", hex);
+/// ```
+#[macro_export]
+macro_rules! sdi_writeln {
+    ($($arg:expr),* $(,)?) => {
+        {
+            $(
+                $crate::debug::sdi_write($arg);
+                $crate::debug::sdi_write(b" ");
+            )*
+            $crate::debug::sdi_write(b"\n");
         }
     };
 }
