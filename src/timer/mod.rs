@@ -4,7 +4,8 @@
 //!
 //! - `TMR0`..`TMR3`: 26-bit timers counting HCLK, each with **one** pin that is
 //!   either its PWM output or its capture input. [`simple_pwm::SimplePwm`]
-//!   drives the PWM output.
+//!   drives the PWM output and [`input_capture::InputCapture`] measures the
+//!   input.
 //! - `PWMX`: eight 8-bit PWM channels (PWM4-PWM11) on one shared counter and
 //!   prescaler, or six 16-bit ones (PWM4-PWM9). See [`pwmx`].
 //!
@@ -15,10 +16,15 @@
 //! | 0     | PA9  | PA10 | PA11 | PB22 |
 //! | 1     | PB23 | PB10 | PB11 | -    |
 //!
-//! PA10/PA11 are the 32 kHz crystal pins and PB10/PB11 the USB pins.
+//! PA10/PA11 are the 32 kHz crystal pins and PB10/PB11 the USB pins. PB23 is
+//! also the RST# input: with `CFG_RESET_EN` set in the user config it is not
+//! usable as TMR0's pin.
+
+use embassy_sync::waitqueue::AtomicWaker;
 
 use crate::{pac, peripherals};
 
+pub mod input_capture;
 pub mod pwmx;
 pub mod simple_pwm;
 
@@ -38,6 +44,8 @@ pub(crate) trait SealedInstance: crate::peripheral::RemapPeripheral {
     fn regs() -> pac::tmr::TmrNodma;
     /// Ungate the timer's clock.
     fn enable();
+    /// Woken by the timer interrupt.
+    fn waker() -> &'static AtomicWaker;
 }
 
 /// A `TMRx` timer.
@@ -62,6 +70,11 @@ mod ch592 {
 
                 fn enable() {
                     set_clock_enabled(ClockGate::$gate, true);
+                }
+
+                fn waker() -> &'static AtomicWaker {
+                    static WAKER: AtomicWaker = AtomicWaker::new();
+                    &WAKER
                 }
             }
 

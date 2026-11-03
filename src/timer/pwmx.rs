@@ -18,7 +18,8 @@
 //! | 0     | PA12 | PA13 | PB0  | PB4  | PB6  | PB7  | PB14  | PB23  |
 //! | 1     | PA6  | PA7  | -    | -    | -    | -    | -     | -     |
 //!
-//! PB14 is the debug link's TIO. CH592F bonds none of PB0, PB6, PA6 and PA7.
+//! PB14 is the debug link's TIO, and PB23 the RST# input when `CFG_RESET_EN`
+//! is set in the user config. CH592F bonds none of PB0, PB6, PA6 and PA7.
 
 use core::marker::PhantomData;
 

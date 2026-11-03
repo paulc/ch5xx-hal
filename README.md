@@ -23,6 +23,8 @@ must be enabled. The chip feature also selects the QingKe core for `qingke` /
 `qingke-rt`. Pin singletons only exist for bonded pins; on CH592 that is the
 QFN32 (CH592X) set, PA4-PA15, PB0, PB4, PB6, PB7, PB10-PB15, PB22 and PB23.
 The QFN28 CH592F lacks PA6, PA7, PB0 and PB6, which still get singletons.
+PB23 is also the RST# input; with `CFG_RESET_EN` set in the user config (as on
+the WeAct board) it reads high whatever drives it.
 
 ## Building
 
@@ -79,13 +81,15 @@ been checked on a WeAct CH592F board by the test examples in `examples/ch592`.
 | `spi` | SPI0 master, blocking and async, `embedded-hal(-async)` | yes (alternate pins PB12-PB15 untested) |
 | `adc` | single-ended and differential, PGA, calibration, temperature, VBAT | yes |
 | `timer::simple_pwm` | `SimplePwm` on TMR0-3 | yes (TMR1/TMR2 remap pins untested) |
+| `timer::input_capture` | `InputCapture` on TMR0-3: period or high/low times, blocking and async | yes |
 | `timer::pwmx` | 8/16-bit PWMX channels 4-11 | yes |
 | `rtc` | counter, alarm, periodic flag, LSI or LSE, LSI calibration | yes |
 | `wdg` | `IndependentWatchdog` (IWDG) | yes |
 | `i2c` | I2C0 master, blocking and async, `embedded-hal(-async)`; on PB15/PB14, so it turns the debug interface off | yes (bus scan) |
 | `usb` | full-speed device for `embassy-usb` | yes (CDC-ACM echo; stall and remote wakeup untested) |
 
-Not implemented: BLE, low-power modes, timer capture, CH585 peripherals.
+Not implemented: BLE, low-power modes, timer count mode and DMA, CH585
+peripherals.
 
 ## What differs from CH32
 
@@ -135,9 +139,9 @@ other.
 
 Besides `blinky`, `sdi_print`, `defmt_rtt` and `clocks` (which reports the
 clock registers), the CH592 examples are hardware tests that print
-`PASS`/`FAIL` lines over SDI print: `adc`, `embassy_time`, `exti`, `pwm`,
-`rtc`, `uart_loopback`, `wdg` (which resets the chip on purpose), and `spi`
-and `uart_async`, which need a PA14-PA15 jumper.
+`PASS`/`FAIL` lines over SDI print: `adc`, `capture`, `embassy_time`, `exti`,
+`pwm`, `rtc`, `uart_loopback`, `wdg` (which resets the chip on purpose), and
+`spi` and `uart_async`, which need a PA14-PA15 jumper.
 `usb_cdc` is a CDC-ACM echo on the USB port; on macOS open
 `/dev/cu.usbmodem*` (the `tty.` node waits for carrier detect, which the
 class never reports). `i2c_scan` reports over UART1 TX (PA9).
