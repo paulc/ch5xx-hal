@@ -8,7 +8,7 @@
 //!   0 V: single-ended, `Vin = Vref * (ADC / (2048 * gain) + 1 - 1 / gain)`.
 //!   [`Adc::to_millivolts`] does that sum.
 //! - An optional input buffer ([`Config::buffer`]), recommended unless the
-//!   source impedance is below 1 kΩ.
+//!   source impedance is below 1 kohm.
 //! - Differential pairs AIN0/AIN2 and AIN1/AIN3
 //!   ([`Adc::convert_differential`]).
 //! - Two internal channels, the battery voltage ([`Vbat`]) and the
@@ -35,7 +35,7 @@ use crate::{pac, peripherals, Peri};
 /// Largest raw conversion result.
 pub const ADC_MAX: u32 = (1 << 12) - 1;
 
-/// Nominal internal reference VINTA, in millivolts (1.05 V ± 15 mV).
+/// Nominal internal reference VINTA, in millivolts (1.05 V +/- 15 mV).
 pub const VREF_MV: u32 = 1050;
 
 /// Raw result for 0 V across a differential pair.
@@ -45,7 +45,7 @@ const CH_VBAT: u8 = 14;
 const CH_TEMP: u8 = 15;
 
 /// Temperature-sensor calibration word in the info flash: the raw reading at
-/// the upper half's temperature (0 = 25 °C) in the lower half.
+/// the upper half's temperature (0 = 25 degC) in the lower half.
 const ROM_CFG_TMP_25C: *const u32 = 0x0007_f014 as *const u32;
 
 /// ADC clock, from the 32 MHz clock. A conversion takes about 17 ADC clocks.
@@ -79,15 +79,15 @@ impl SampleClock {
 /// Single-ended input ranges (Vref = 1.05 V), with the datasheet's
 /// high-accuracy range in brackets:
 ///
-/// | Gain      | Range            | Accurate        |
-/// |-----------|------------------|-----------------|
-/// | `Quarter` | -0.2 V – VIO33   | (2.9 V – VIO33) |
-/// | `Half`    | -0.2 V – 3.15 V  | (1.9 V – 3 V)   |
-/// | `X1`      | 0 V – 2.1 V      | (0 V – 2 V)     |
-/// | `X2`      | 0.53 V – 1.58 V  | (0.6 V – 1.5 V) |
-/// | `X4`      | 0.79 V – 1.31 V  |                 |
-/// | `X8`      | 0.92 V – 1.18 V  |                 |
-/// | `X16`     | 0.98 V – 1.12 V  |                 |
+/// | Gain      | Range            | Accurate         |
+/// |-----------|------------------|------------------|
+/// | `Quarter` | -0.2 V to VIO33  | (2.9 V to VIO33) |
+/// | `Half`    | -0.2 V to 3.15 V | (1.9 V to 3 V)   |
+/// | `X1`      | 0 V to 2.1 V     | (0 V to 2 V)     |
+/// | `X2`      | 0.53 V to 1.58 V | (0.6 V to 1.5 V) |
+/// | `X4`      | 0.79 V to 1.31 V |                  |
+/// | `X8`      | 0.92 V to 1.18 V |                  |
+/// | `X16`     | 0.98 V to 1.12 V |                  |
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Gain {
@@ -222,7 +222,7 @@ impl<'d, T: Instance> Adc<'d, T> {
         self.run(ch, gain, buffer, diff)
     }
 
-    /// Convert a differential pair: AIN0 − AIN2 or AIN1 − AIN3.
+    /// Convert a differential pair: AIN0 - AIN2 or AIN1 - AIN3.
     ///
     /// 0x800 means 0 V; see [`Adc::to_millivolts_differential`].
     ///
@@ -331,7 +331,7 @@ pub struct Temperature;
 impl Temperature {
     /// Convert a raw reading to thousandths of a degree Celsius, with the
     /// factory calibration word, as WCH's `adc_to_temperature_celsius`
-    /// (2.83 LSB/°C).
+    /// (2.83 LSB/degC).
     pub fn to_millicelsius(raw: u16) -> i32 {
         let c25 = unsafe { ROM_CFG_TMP_25C.read_volatile() };
         let at = match c25 >> 16 {

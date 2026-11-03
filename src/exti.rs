@@ -36,7 +36,7 @@ static EXTI_WAKERS: [AtomicWaker; 32] = [NEW_AW; 32];
 fn int_bit(port: Port, n: u8) -> u8 {
     match port {
         Port::A => n,
-        // PB22/PB23 → bits 8/9 (see the module docs).
+        // PB22/PB23 -> bits 8/9 (see the module docs).
         Port::B if n >= 16 => n - 14,
         Port::B => n,
     }

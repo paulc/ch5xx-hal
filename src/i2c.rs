@@ -13,9 +13,9 @@
 //!
 //! # Pins (CH592)
 //!
-//! SCL PB15, SDA PB14 — the debug link's TCK/TIO. With the debug interface
-//! enabled in the user config the pins belong to it, so creating the driver
-//! turns the interface off ([`crate::debug::set_debug_interface_enabled`])
+//! SCL PB15 and SDA PB14, the debug link's TCK and TIO. With the debug
+//! interface enabled in the user config the pins belong to it, so creating the
+//! driver turns the interface off ([`crate::debug::set_debug_interface_enabled`])
 //! and dropping it turns it back on. That takes the debugger (and SDI
 //! print) off the chip, and needs a part whose lot number supports it; on
 //! older parts disable `CFG_DEBUG_EN` with the ISP tool instead.

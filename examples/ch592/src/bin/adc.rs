@@ -67,7 +67,7 @@ async fn main(_spawner: Spawner) -> ! {
     let c25 = unsafe { core::ptr::read_volatile(0x0007_f014 as *const u32) };
     hal::println!("TS raw {} cal {:#010x}", raw, c25);
     let mc = Temperature::to_millicelsius(raw);
-    c.check("temperature m°C in 5..50 °C", (5_000..50_000).contains(&mc), mc);
+    c.check("temperature mdegC in 5..50 degC", (5_000..50_000).contains(&mc), mc);
 
     let mut vbat = adc.enable_vbat();
     let raw = adc.convert(&mut vbat);

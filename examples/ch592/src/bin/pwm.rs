@@ -88,7 +88,7 @@ impl Checks {
             Ok((per, hi)) => {
                 let d = hi * 1000 / per;
                 hal::println!(
-                    "  {}: period {} (want {}), duty {}‰ (want {}‰)",
+                    "  {}: period {} (want {}), duty {} permille (want {})",
                     name,
                     per,
                     period,

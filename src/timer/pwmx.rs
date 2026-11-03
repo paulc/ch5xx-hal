@@ -126,7 +126,7 @@ impl<'d> Pwmx<'d> {
         this
     }
 
-    /// Set the PWM frequency: the prescaler becomes HCLK / (`freq` × period),
+    /// Set the PWM frequency: the prescaler becomes HCLK / (`freq` * period),
     /// rounded, within `1..=255`. See [`Pwmx::frequency`] for the result.
     pub fn set_frequency(&mut self, freq: Hertz) {
         let clk = crate::rcc::clocks().sysclk.0 as u64;

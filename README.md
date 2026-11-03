@@ -21,7 +21,7 @@ code serves every supported chip in the family.
 Chip support is selected with a Cargo feature (`ch585`, `ch592`). Exactly one
 must be enabled. The chip feature also selects the QingKe core for `qingke` /
 `qingke-rt`. Pin singletons only exist for bonded pins; on CH592 that is the
-QFN32 (CH592X) set, PA4–PA15, PB0, PB4, PB6, PB7, PB10–PB15, PB22 and PB23.
+QFN32 (CH592X) set, PA4-PA15, PB0, PB4, PB6, PB7, PB10-PB15, PB22 and PB23.
 The QFN28 CH592F lacks PA6, PA7, PB0 and PB6, which still get singletons.
 
 ## Building
@@ -75,11 +75,11 @@ been checked on a WeAct CH592F board by the test examples in `examples/ch592`.
 | `debug` | SDI print (`println!` over the debug link) | yes |
 | `embassy` | `embassy-time` driver on SysTick (feature `embassy`) | yes |
 | `exti` | `ExtiInput` pin interrupts, async edge/level waits (feature `exti`) | yes |
-| `uart` | UART0–3, blocking and async, `embedded-io(-async)` | yes |
-| `spi` | SPI0 master, blocking and async, `embedded-hal(-async)` | yes (alternate pins PB12–PB15 untested) |
+| `uart` | UART0-3, blocking and async, `embedded-io(-async)` | yes |
+| `spi` | SPI0 master, blocking and async, `embedded-hal(-async)` | yes (alternate pins PB12-PB15 untested) |
 | `adc` | single-ended and differential, PGA, calibration, temperature, VBAT | yes |
-| `timer::simple_pwm` | `SimplePwm` on TMR0–3 | yes (TMR1/TMR2 remap pins untested) |
-| `timer::pwmx` | 8/16-bit PWMX channels 4–11 | yes |
+| `timer::simple_pwm` | `SimplePwm` on TMR0-3 | yes (TMR1/TMR2 remap pins untested) |
+| `timer::pwmx` | 8/16-bit PWMX channels 4-11 | yes |
 | `rtc` | counter, alarm, periodic flag, LSI or LSE, LSI calibration | yes |
 | `wdg` | `IndependentWatchdog` (IWDG) | yes |
 | `i2c` | I2C0 master, blocking and async, `embedded-hal(-async)`; on PB15/PB14, so it turns the debug interface off | yes (bus scan) |
@@ -95,7 +95,7 @@ The CH5xx register model is not a CH32 one, so a few things look different:
   `0x4000_1000`.
 - **No AFIO.** Peripheral signals are routed with the `SYS.PIN_ALTERNATE`
   "alternate pin enable" bits rather than a remap register.
-- **One GPIO block** with per-port register groups (`pa_out`, `pb_dir`, …)
+- **One GPIO block** with per-port register groups (`pa_out`, `pb_dir`, ...)
   instead of one peripheral per port.
 
 ## System clock
@@ -137,7 +137,7 @@ Besides `blinky`, `sdi_print`, `defmt_rtt` and `clocks` (which reports the
 clock registers), the CH592 examples are hardware tests that print
 `PASS`/`FAIL` lines over SDI print: `adc`, `embassy_time`, `exti`, `pwm`,
 `rtc`, `uart_loopback`, `wdg` (which resets the chip on purpose), and `spi`
-and `uart_async`, which need a PA14–PA15 jumper.
+and `uart_async`, which need a PA14-PA15 jumper.
 `usb_cdc` is a CDC-ACM echo on the USB port; on macOS open
 `/dev/cu.usbmodem*` (the `tty.` node waits for carrier detect, which the
 class never reports). `i2c_scan` reports over UART1 TX (PA9).
@@ -161,8 +161,8 @@ before calling it (as `i2c_scan` does) so the debugger can still attach.
 
 CH585 has no SDI printf (the debug-module `DATA0`/`DATA1` handshake is not
 present). CH592 has it, but wlink needs a one-line patch to use it; see
-`examples/ch592/src/bin/sdi_print.rs`. Otherwise use `defmt` over SEGGER RTT
-— no special chip support is needed, and `probe-rs` handles it natively:
+`examples/ch592/src/bin/sdi_print.rs`. Otherwise use `defmt` over SEGGER RTT,
+which needs no special chip support and which `probe-rs` handles natively:
 
 ```console
 cd examples/ch585

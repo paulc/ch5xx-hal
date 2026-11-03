@@ -38,7 +38,7 @@ static TICKS_PER_SEC: core::sync::atomic::AtomicU32 =
 const RTC_BASE: u32 = 0x4000_1000;
 
 /// RTC count used for the calibration window. 1024 counts at 32.768 kHz is
-/// 31.25 ms — long enough for a precise ratio, short enough not to stall boot.
+/// 31.25 ms: long enough for a precise ratio, short enough not to stall boot.
 #[cfg(not(ch592))]
 const CAL_COUNTS: u16 = 1024;
 
@@ -50,7 +50,7 @@ const RTC_HZ: u32 = 32_768;
 #[inline(always)]
 fn rtc_count() -> u16 {
     // `CNT_32K` is the 16-bit register at 0x38. It wraps every 2 s, but the
-    // calibration window is only 31 ms, so the low half alone is enough —
+    // calibration window is only 31 ms, so the low half alone is enough;
     // `wrapping_sub` handles the one wrap that could occur.
     unsafe { core::ptr::read_volatile((RTC_BASE + 0x38) as *const u16) }
 }
@@ -78,7 +78,7 @@ impl Delay {
     /// reset or reload the counter: the time driver shares it, using only the
     /// compare register.
     pub(crate) unsafe fn init() {
-        // Free-running, up-count, HCLK source (`STCLK` set — clearing it
+        // Free-running, up-count, HCLK source (`STCLK` set; clearing it
         // would select HCLK/8). `STE` starts it.
         SYSTICK.stk_sr().modify(|w| w.set_cntif(false));
         SYSTICK.stk_cntl().write(|w| w.set_cntl(0));

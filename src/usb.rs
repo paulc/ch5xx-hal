@@ -15,7 +15,7 @@
 //!   than passed in, because the hardware fixes where each direction of
 //!   an endpoint lives relative to its `UEPn_DMA` address.
 //!
-//! Endpoints 1–7, IN and OUT, up to 64 bytes. Bulk and interrupt only:
+//! Endpoints 1-7, IN and OUT, up to 64 bytes. Bulk and interrupt only:
 //! isochronous endpoints and double buffering are not supported. A `write`
 //! or `read` future dropped before it completes leaves its packet armed.
 //!
@@ -50,7 +50,7 @@ use crate::interrupt::typelevel::Interrupt as _;
 use crate::sys::{set_clock_enabled, ClockGate};
 use crate::{interrupt, pac, peripherals, Peri};
 
-/// Endpoints 0–7. The 8–15 extension (`R32_EPX_MODE`) is not used.
+/// Endpoints 0-7. The 8-15 extension (`R32_EPX_MODE`) is not used.
 const EP_COUNT: usize = 8;
 const MAX_PACKET_SIZE: u16 = 64;
 
@@ -69,7 +69,7 @@ const RES_STALL: u8 = 0b11;
 struct Buffers {
     /// EP0 (shared by IN and OUT), then EP4's OUT and IN buffers.
     ep0_4: [u8; 192],
-    /// EP1–3 and EP5–7: OUT at +0, IN at +64.
+    /// EP1-3 and EP5-7: OUT at +0, IN at +64.
     ep: [[u8; 128]; 6],
 }
 

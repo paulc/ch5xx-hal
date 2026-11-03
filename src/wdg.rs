@@ -4,7 +4,7 @@
 //! sets the timeout, [`unleash`](IndependentWatchdog::unleash) starts it and
 //! [`pet`](IndependentWatchdog::pet) reloads it. Like the STM32 IWDG it counts
 //! the internal 32 kHz RC (LSI) down from a 12-bit reload through a /4../512
-//! prescaler, so timeouts run from 125 µs to about 65 s, to the LSI's
+//! prescaler, so timeouts run from 125 us to about 65 s, to the LSI's
 //! accuracy. Once started it cannot be stopped.
 
 use crate::sys::safe_access;
@@ -28,7 +28,7 @@ impl<'d, T: Instance> IndependentWatchdog<'d, T> {
     ///
     /// # Panics
     ///
-    /// If the timeout is outside 125 µs..=65.5 s.
+    /// If the timeout is outside 125 us..=65.5 s.
     pub fn new(wdg: Peri<'d, T>, timeout_us: u32) -> Self {
         // Find the smallest prescaler (/4 << pr) whose reload fits 12 bits.
         let ticks = timeout_us as u64 * LSI_HZ / 1_000_000;

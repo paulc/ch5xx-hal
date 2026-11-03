@@ -8,8 +8,8 @@
 //!   `RccPeripheral` / `RemapPeripheral` impls ch32-hal emits have no
 //!   counterpart here.
 //! - GPIO is **one** peripheral (`GPIO`) split into per-port accessor registers
-//!   (`PA_DIR`, `PB_OUT`, …), not one peripheral per port. Pins are still
-//!   individual singletons (`PA0`, … `PB23`) so the driver API is unchanged.
+//!   (`PA_DIR`, `PB_OUT`, ...), not one peripheral per port. Pins are still
+//!   individual singletons (`PA0`, ..., `PB23`) so the driver API is unchanged.
 //! - There are no per-pin EXTI channels; `GPIO_A` / `GPIO_B` are whole-port
 //!   interrupts.
 
@@ -42,7 +42,7 @@ fn main() {
     println!("cargo:rustc-cfg={chip_name}");
 
     // Per-chip bonded GPIO pins. The metadata does not carry pins yet (see
-    // ch5xx-data AGENTS.md, "Pins … are not in the SVD; leave them for hand
+    // ch5xx-data AGENTS.md, "Pins ... are not in the SVD; leave them for hand
     // editing"), and the bonded set differs per die, so it lives here until
     // pins land in the data. Only listed pins get a singleton; for chips sold
     // in several packages, list the largest package.
@@ -67,7 +67,7 @@ fn main() {
     };
 
     // Peripheral singletons. Skip the register-less placeholders (BLE) and the
-    // core-internal blocks (PFIC, SysTick) — the HAL never hands those out.
+    // core-internal blocks (PFIC, SysTick); the HAL never hands those out.
     const SKIP_KINDS: &[&str] = &["pfic", "systick"];
     let mut singletons: Vec<String> = Vec::new();
     for p in METADATA.peripherals {

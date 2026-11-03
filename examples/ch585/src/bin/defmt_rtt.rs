@@ -1,7 +1,7 @@
 //! Log to the host with `defmt` over SEGGER RTT.
 //!
 //! RTT is a RAM-based ring buffer that the debugger reads out of memory, so it
-//! needs no UART pin and no special chip support — unlike SDI printf, which the
+//! needs no UART pin and no special chip support, unlike SDI printf, which the
 //! CH585 does not have.
 //!
 //! ```console

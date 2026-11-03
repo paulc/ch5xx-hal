@@ -2,7 +2,7 @@
 //!
 //! Unlike the CH32 families there is **one** GPIO block, `pac::GPIO`, and each
 //! port is a group of registers inside it (`PA_DIR`/`PB_DIR`, `PA_OUT`/`PB_OUT`,
-//! …) rather than a peripheral of its own. A pin is therefore identified by
+//! ...) rather than a peripheral of its own. A pin is therefore identified by
 //! (port, bit) and the driver dispatches on the port letter.
 //!
 //! Per-port register set (CH585, offsets from `0x4000_1000`): interrupt enable,
@@ -512,7 +512,7 @@ impl<'d> Output<'d> {
 
 /// Enable the GPIO block.
 ///
-/// There is no peripheral clock gate to turn on — the CH5xx GPIO is always
+/// There is no peripheral clock gate to turn on; the CH5xx GPIO is always
 /// clocked. All this does is keep the same call shape as ch32-hal so `init` can
 /// treat it uniformly.
 pub(crate) unsafe fn init(_cs: CriticalSection) {

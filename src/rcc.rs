@@ -8,7 +8,7 @@
 //! # CH592
 //!
 //! Every HCLK source is derived from the 32 MHz crystal (HSE): either HSE
-//! divided by `CLK_PLL_DIV`, or the 480 MHz PLL (HSE × 15) divided by it. The
+//! divided by `CLK_PLL_DIV`, or the 480 MHz PLL (HSE x 15) divided by it. The
 //! frequency is therefore *computed* from `CLK_CFG`, which is exact; the boot
 //! ROM leaves the reset default, HSE / 5 = 6.4 MHz. `Config::sysclk` selects
 //! another rate, applied with the same sequence (and flash timing) as WCH's
@@ -93,12 +93,12 @@ mod ch592 {
 
     /// HSE (external crystal) frequency. The CH592 needs a 32 MHz crystal.
     pub const HSE_FREQUENCY: Hertz = Hertz(32_000_000);
-    /// PLL output: HSE × 15.
+    /// PLL output: HSE x 15.
     pub const PLL_FREQUENCY: Hertz = Hertz(480_000_000);
 
     /// System clock (HCLK) source.
     ///
-    /// The datasheet allows HCLK of 2–10 MHz or 15–80 MHz; this HAL stops at
+    /// The datasheet allows HCLK of 2-10 MHz or 15-80 MHz; this HAL stops at
     /// 60 MHz (see [`Sysclk::Pll`]).
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum Sysclk {

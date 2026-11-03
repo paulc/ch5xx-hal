@@ -9,7 +9,7 @@
 //!   `SYS.PIN_ALTERNATE` bits; drivers take the choice as a `REMAP` const
 //!   generic, as in ch32-hal.
 //! - **One GPIO block**, `pac::GPIO`, with per-port register groups
-//!   (`pa_out`, `pb_dir`, …) instead of one peripheral per port.
+//!   (`pa_out`, `pb_dir`, ...) instead of one peripheral per port.
 //!
 //! # Drivers
 //!

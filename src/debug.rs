@@ -18,7 +18,7 @@ pub struct SDIPrint;
 
 /// Iterations [`SDIPrint::write_str_lossy`] tolerates per chunk. Kept small
 /// because each iteration is a *debug-module* read, which is far slower than a
-/// normal load — and deliberately *not* remembered across calls: a console that
+/// normal load, and deliberately *not* remembered across calls: a console that
 /// attaches later must still receive output, so each message pays its own budget.
 #[cfg(ch592)]
 const SPINS: u32 = 20_000;
