@@ -4,8 +4,8 @@
 //!
 //! - `TMR0`..`TMR3`: 26-bit timers counting HCLK, each with **one** pin that is
 //!   either its PWM output or its capture input. [`simple_pwm::SimplePwm`]
-//!   drives the PWM output and [`input_capture::InputCapture`] measures the
-//!   input (TMR1/TMR2 also by DMA).
+//!   drives the PWM output, [`input_capture::InputCapture`] measures the
+//!   input (TMR1/TMR2 also by DMA) and [`counter::Counter`] counts its edges.
 //! - `PWMX`: eight 8-bit PWM channels (PWM4-PWM11) on one shared counter and
 //!   prescaler, or six 16-bit ones (PWM4-PWM9). See [`pwmx`].
 //!
@@ -27,6 +27,7 @@ use embassy_sync::waitqueue::AtomicWaker;
 
 use crate::{interrupt, pac, peripherals};
 
+pub mod counter;
 pub mod input_capture;
 pub mod pwmx;
 pub mod simple_pwm;
@@ -69,7 +70,8 @@ pub trait DmaInstance: Instance + SealedDmaInstance {}
 
 pin_trait!(TimerPin, Instance);
 
-/// Timer interrupt handler, for the async [`input_capture::InputCapture`].
+/// Timer interrupt handler, for the async [`input_capture::InputCapture`]
+/// and [`counter::Counter`].
 pub struct InterruptHandler<T: Instance> {
     _phantom: PhantomData<T>,
 }

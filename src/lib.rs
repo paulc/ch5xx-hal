@@ -17,7 +17,7 @@
 //! CH592 only).
 //!
 //! CH592: `adc`, `embassy` (time driver), `exti`, `i2c`, `rtc`, `spi`,
-//! `timer` (PWM, input capture with DMA), `uart`, `usb`
+//! `timer` (PWM, input capture with DMA, edge counter), `uart`, `usb`
 //! (`embassy-usb` device) and `wdg`. Where the peripheral exists in ch32-hal
 //! the API follows it; blocking and async (`embedded-hal`,
 //! `embedded-hal-async`, `embedded-io(-async)`) variants are provided where
