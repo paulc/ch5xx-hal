@@ -150,6 +150,19 @@ PA14-PA15 jumper. `soft_i2c_sensors` reads an AHT20 and a BMP280 on PB13
 `/dev/cu.usbmodem*` (the `tty.` node waits for carrier detect, which the
 class never reports). `i2c_scan` reports over UART1 TX (PA9).
 
+The embassy examples build with either executor platform: `platform-spin`
+(the default; never sleeps) or `platform-riscv32`, which sleeps between
+polls:
+
+```console
+cd examples/ch592
+cargo run --release --no-default-features --features platform-riscv32 --bin uart_async
+```
+
+`platform-riscv32` sleeps in `wfi` inside a critical section, which wakes on
+QingKe only because qingke-rt turns `wfi` into `wfe` and `init()` sets
+`PFIC_SCTLR.SEVONPEND`, making a pending (masked) interrupt a wake-up event.
+
 The examples enable the HAL's `highcode` feature, which runs interrupt entry
 and the functions placed in `.highcode` from RAM: CH592 flash runs code
 roughly ten times slower than RAM (an empty loop iteration takes 32 cycles).
