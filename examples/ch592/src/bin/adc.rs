@@ -7,19 +7,36 @@
 //! - The AIN0 (PA4) / AIN2 (PA12) differential pair, pulled opposite ways.
 //! - The offset calibration, conversion time, and that an analog pin's digital
 //!   input is off and comes back when the pin is made an `Input`.
+//! - DMA reads, back to back and timed, blocking and async, and that dropping
+//!   the async one stops it; the order of DMA results, PA8 going high part way.
+//! - The async (interrupt) conversion.
+//! - Ring-buffered reads: blocking, async, and overrun.
 
 #![no_std]
 #![no_main]
 
 use ch5xx_hal as hal;
 use embassy_executor::Spawner;
-use embassy_time::Instant;
-use hal::adc::{Adc, AdcChannel, Config, Gain, Temperature, Vbat};
+use embassy_futures::join::join;
+use embassy_futures::select::{select, Either};
+use embassy_time::{Instant, Timer};
+use hal::adc::{Adc, AdcChannel, Config, Gain, OverrunError, Pace, Temperature, Vbat};
 use hal::debug::SDIPrint;
 use hal::delay::Delay;
 use hal::gpio::{Input, Pull};
-use hal::pac;
+use hal::{bind_interrupts, pac, peripherals};
 use panic_halt as _;
+
+bind_interrupts!(struct Irqs {
+    ADC => hal::adc::InterruptHandler<peripherals::ADC>;
+});
+
+/// Index of the first of `buf` at or above `level`, if all before are below
+/// and all after at or above.
+fn one_step(buf: &[u16], level: u16) -> Option<usize> {
+    let i = buf.iter().position(|&v| v >= level)?;
+    buf[i..].iter().all(|&v| v >= level).then_some(i)
+}
 
 struct Checks {
     pass: u32,
@@ -54,7 +71,7 @@ async fn main(_spawner: Spawner) -> ! {
     let mut delay = Delay;
     let mut c = Checks { pass: 0, fail: 0 };
 
-    let mut adc = Adc::new(p.ADC, Config::default());
+    let mut adc = Adc::new(p.ADC.reborrow(), Config::default());
 
     // Internal channels.
     let mut ts = adc.enable_temperature();
@@ -176,6 +193,144 @@ async fn main(_spawner: Spawner) -> ! {
     drop(inp);
     pull(4, Pull::None);
     pull(12, Pull::None);
+
+    // DMA, blocking, of VBAT.
+    let one = adc.convert(&mut vbat) as i32;
+    let near = |buf: &[u16]| buf.iter().all(|&v| (v as i32 - one).abs() < 24);
+    let mut buf = [0u16; 64];
+    for (pace, lo, hi) in [(Pace::Continuous, 300, 450), (Pace::Timed(188), 3_100, 3_350)] {
+        buf.fill(0xffff);
+        let t0 = Instant::now();
+        adc.blocking_read_dma(&mut vbat, &mut buf, pace);
+        let us = t0.elapsed().as_micros() as i32;
+        hal::println!("blocking_read_dma {:?}: 64 in {} us", pace, us);
+        c.check("  64 VBAT results near a single conversion", near(&buf), buf[63] as i32);
+        c.check("  in the expected time (us)", (lo..hi).contains(&us), us);
+    }
+
+    drop(adc);
+
+    // Async.
+    let mut adc = Adc::new_async(p.ADC.reborrow(), Irqs, Config::default());
+    let v = adc.read(&mut vbat).await as i32;
+    c.check("async read of VBAT near a blocking one", (v - one).abs() < 24, v);
+
+    // Ring buffer, read blocking: 300 results through 32 slots, back to back.
+    {
+        let mut ring_buf = [0u16; 32];
+        let mut out = [0u16; 300];
+        let t0 = Instant::now();
+        let mut ring = adc.start_ring(&mut vbat, &mut ring_buf, Pace::Continuous);
+        let mut r = Ok(());
+        for chunk in out.chunks_mut(10) {
+            r = r.and(ring.blocking_read(chunk));
+        }
+        let us = t0.elapsed().as_micros() as i32;
+        c.check("ring blocking_read 300 results: no overrun", r.is_ok(), 0);
+        c.check("  results near a single conversion", near(&out), out[299] as i32);
+        c.check("  in 1600..1900 us", (1_600..1_900).contains(&us), us);
+        // Read back to back, printing after: a printed line takes ~3 ms.
+        delay.delay_us(300);
+        let r1 = ring.try_read(&mut out);
+        let r2 = ring.try_read(&mut out);
+        delay.delay_us(100);
+        let r3 = ring.try_read(&mut out);
+        drop(ring);
+        c.check("  falling 50 behind: overrun", r1 == Err(OverrunError), 0);
+        c.check(
+            "  then reading resumes",
+            matches!(r2, Ok(n) if n < 4),
+            r2.unwrap_or(99) as i32,
+        );
+        c.check(
+            "  ~20 results 100 us later",
+            matches!(r3, Ok(15..=30)),
+            r3.unwrap_or(99) as i32,
+        );
+    }
+
+    // Async DMA of PA8 at 1/4 gain, 50 us apart, while it goes high after 1 ms.
+    adc.set_gain(Gain::Quarter);
+    let mut led = p.PA8.reborrow().degrade_adc();
+    g.pa_clr().write(|w| w.set_pa_clr(8, true));
+    g.pa_dir().modify(|w| w.set_pa_dir(8, true));
+    buf.fill(0xffff);
+    let t0 = Instant::now();
+    join(
+        adc.read_dma(&mut led, &mut buf, Pace::from_hz(20_000).unwrap()),
+        async {
+            Timer::after_micros(1000).await;
+            g.pa_set().write(|w| w.set_pa_set(8, true));
+        },
+    )
+    .await;
+    let us = t0.elapsed().as_micros() as i32;
+    let step = one_step(&buf, 2000);
+    hal::println!("read_dma 64 x 50 us of PA8: {} us, high from {:?}", us, step);
+    c.check(
+        "  low then high, once, about 20 in",
+        matches!(step, Some(17..=23)),
+        step.unwrap_or(99) as i32,
+    );
+    c.check("  in 3200..3500 us", (3_200..3_500).contains(&us), us);
+
+    // Dropping it part way stops the DMA.
+    buf.fill(0xffff);
+    let r = select(
+        adc.read_dma(&mut led, &mut buf, Pace::from_hz(20_000).unwrap()),
+        Timer::after_micros(1000),
+    )
+    .await;
+    Timer::after_millis(3).await;
+    let filled = buf.iter().position(|&v| v == 0xffff).unwrap_or(64);
+    c.check(
+        "dropped read_dma stops (~20 results)",
+        matches!(r, Either::Second(())) && (15..=25).contains(&filled),
+        filled as i32,
+    );
+    // The next DMA into the same buffer starts at its beginning.
+    buf.fill(0xffff);
+    let t0 = Instant::now();
+    adc.read_dma(&mut led, &mut buf, Pace::from_hz(20_000).unwrap()).await;
+    let us = t0.elapsed().as_micros() as i32;
+    c.check(
+        "  next read_dma fills all 64, in 3200..3500 us",
+        !buf.contains(&0xffff) && (3_200..3_500).contains(&us),
+        us,
+    );
+    g.pa_dir().modify(|w| w.set_pa_dir(8, false));
+    adc.set_gain(Gain::X1);
+
+    // Ring buffer, async, 50 us apart: about 100 results in 5 ms.
+    {
+        let mut ring_buf = [0u16; 16];
+        let mut out = [0u16; 8];
+        let mut ring = adc.start_ring(&mut vbat, &mut ring_buf, Pace::from_hz(20_000).unwrap());
+        let mut total = 0;
+        let mut reads = 0;
+        let mut ok = true;
+        let t0 = Instant::now();
+        while t0.elapsed().as_micros() < 5_000 {
+            match select(ring.read(&mut out), Timer::after_micros(500)).await {
+                Either::First(Ok(n)) => {
+                    total += n;
+                    reads += 1;
+                    ok &= near(&out[..n]);
+                }
+                _ => {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        hal::println!("ring read: {} results in {} reads", total, reads);
+        c.check(
+            "ring async read: ~100 results in 5 ms",
+            (97..=103).contains(&total) && ok,
+            total as i32,
+        );
+        c.check("  woken per result or so", reads > 50, reads as i32);
+    }
 
     hal::println!("ADC: {} passed, {} failed", c.pass, c.fail);
     loop {

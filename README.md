@@ -79,7 +79,7 @@ been checked on a WeAct CH592F board by the test examples in `examples/ch592`.
 | `exti` | `ExtiInput` pin interrupts, async edge/level waits (feature `exti`) | yes |
 | `uart` | UART0-3, blocking and async, `embedded-io(-async)` | yes |
 | `spi` | SPI0 master, blocking and async, `embedded-hal(-async)` | yes (alternate pins PB12-PB15 untested) |
-| `adc` | single-ended and differential, PGA, calibration, temperature, VBAT | yes |
+| `adc` | single-ended and differential, PGA, calibration, temperature, VBAT; async (interrupt) reads, DMA reads (back to back or timed), ring-buffered DMA | yes |
 | `timer::simple_pwm` | `SimplePwm` on TMR0-3 | yes (TMR1/TMR2 remap pins untested) |
 | `timer::input_capture` | `InputCapture` on TMR0-3: period or high/low times, blocking and async; DMA on TMR1/TMR2 | yes |
 | `timer::counter` | `Counter` on TMR0-3: edge counting with a wrap period, blocking and async | yes |
