@@ -58,6 +58,10 @@ embassy = ["rt", "dep:embassy-time-driver", "dep:embassy-time-queue-utils"]
 ## Built-in GPIO_A/GPIO_B interrupt handlers for `exti::ExtiInput` (CH592).
 ## Disable to provide your own.
 exti = ["rt"]
+## Run interrupt entry, the vector table and `.highcode` functions from RAM
+## (`qingke-rt`'s `highcode`), as ch32-hal does. Code runs several times
+## faster from RAM than from CH592 flash; `soft_i2c` needs it for 100 kHz.
+highcode = ["rt", "qingke-rt?/highcode"]
 
 # Chip-selection features. Exactly one must be enabled; `ch5xx-metapac` panics
 # otherwise. Each chip also selects its QingKe core, as ch32-hal does, since the

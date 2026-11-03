@@ -142,9 +142,14 @@ clock registers), the CH592 examples are hardware tests that print
 `PASS`/`FAIL` lines over SDI print: `adc`, `capture`, `counter`,
 `embassy_time`, `exti`, `pwm`, `rtc`, `uart_loopback`, `wdg` (which resets the
 chip on purpose), and `spi` and `uart_async`, which need a PA14-PA15 jumper.
+
 `usb_cdc` is a CDC-ACM echo on the USB port; on macOS open
 `/dev/cu.usbmodem*` (the `tty.` node waits for carrier detect, which the
 class never reports). `i2c_scan` reports over UART1 TX (PA9).
+
+The examples enable the HAL's `highcode` feature, which runs interrupt entry
+and the functions placed in `.highcode` from RAM: CH592 flash runs code
+roughly ten times slower than RAM (an empty loop iteration takes 32 cycles).
 
 ### PB14/PB15
 
