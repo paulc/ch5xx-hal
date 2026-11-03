@@ -233,7 +233,9 @@ async fn main(_spawner: Spawner) -> ! {
         delay.delay_us(300);
         let r1 = ring.try_read(&mut out);
         let r2 = ring.try_read(&mut out);
-        delay.delay_us(100);
+        // One try_read takes ~40 us from flash: wait less than the 180 us
+        // the ring holds, less that.
+        delay.delay_us(50);
         let r3 = ring.try_read(&mut out);
         drop(ring);
         c.check("  falling 50 behind: overrun", r1 == Err(OverrunError), 0);
@@ -243,8 +245,8 @@ async fn main(_spawner: Spawner) -> ! {
             r2.unwrap_or(99) as i32,
         );
         c.check(
-            "  ~20 results 100 us later",
-            matches!(r3, Ok(15..=30)),
+            "  ~15 results 50 us later",
+            matches!(r3, Ok(8..=25)),
             r3.unwrap_or(99) as i32,
         );
     }

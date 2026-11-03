@@ -276,8 +276,14 @@ impl<'d, T: Instance> Adc<'d, T, Async> {
     }
 
     /// Fill `buf` with conversions of `channel` spaced by `pace`, the DMA
-    /// storing each result; waits for the DMA-end interrupt. Dropping the
-    /// future stops the conversions.
+    /// storing each result. Dropping the future stops the conversions.
+    ///
+    /// The ADC DMA moves results only while the core is awake (checked on
+    /// CH592: one that ends while the core sleeps waits for a wake-up, and the
+    /// timed conversions behind it with it). So rather than sleep until an
+    /// interrupt, this keeps its task scheduled, as `yield_now` does, until
+    /// the buffer is full: other tasks still run, and an executor that would
+    /// sleep (`platform-riscv32`) stays awake until then.
     ///
     /// # Panics
     ///
@@ -285,20 +291,13 @@ impl<'d, T: Instance> Adc<'d, T, Async> {
     pub async fn read_dma(&mut self, channel: &mut impl AdcChannel<T>, buf: &mut [u16], pace: Pace) {
         self.select(channel);
         let r = T::regs();
-        let guard = OnDrop::new(|| {
-            T::Interrupt::disable();
-            stop_dma(r);
-        });
+        let guard = OnDrop::new(|| stop_dma(r));
         start_dma(r, buf, pace, false);
         poll_fn(|cx| {
-            T::state().waker.register(cx.waker());
             if r.dma_if().read().if_dma_end() {
                 return Poll::Ready(());
             }
-            unmask::<T>();
-            if r.dma_if().read().if_dma_end() {
-                return Poll::Ready(());
-            }
+            cx.waker().wake_by_ref();
             Poll::Pending
         })
         .await;
@@ -312,6 +311,11 @@ impl<'d, T: Instance> Adc<'d, T, Async> {
     ///
     /// The front end is set up as [`Adc::convert`] sets it. The interrupt
     /// stays unmasked while the ring runs, to count the DMA's laps of `buf`.
+    ///
+    /// As for [`Adc::read_dma`], the DMA moves results only while the core is
+    /// awake: with an executor that sleeps (`platform-riscv32`) conversions
+    /// pause while it sleeps, and [`RingBufferedAdc::read`] keeps its task
+    /// scheduled while it waits.
     ///
     /// # Panics
     ///
@@ -640,27 +644,19 @@ impl<'a, 'd, T: Instance> RingBufferedAdc<'a, 'd, T> {
     }
 
     /// Copy the results that have arrived into `out`, as many as fit,
-    /// waiting (for the end-of-conversion interrupt) until there is at least
-    /// one; returns how many.
+    /// waiting until there is at least one; returns how many.
+    ///
+    /// The task stays scheduled while it waits, as for [`Adc::read_dma`].
     pub async fn read(&mut self, out: &mut [u16]) -> Result<usize, OverrunError> {
         if out.is_empty() {
             return Ok(0);
         }
-        let r = T::regs();
-        poll_fn(|cx| {
-            T::state().waker.register(cx.waker());
-            match self.try_read(out) {
-                Ok(0) => {}
-                res => return Poll::Ready(res),
+        poll_fn(|cx| match self.try_read(out) {
+            Ok(0) => {
+                cx.waker().wake_by_ref();
+                Poll::Pending
             }
-            r.ctrl_dma().modify(|w| w.set_ie_eoc(true));
-            match self.try_read(out) {
-                Ok(0) => Poll::Pending,
-                res => {
-                    r.ctrl_dma().modify(|w| w.set_ie_eoc(false));
-                    Poll::Ready(res)
-                }
-            }
+            res => Poll::Ready(res),
         })
         .await
     }
@@ -827,19 +823,12 @@ impl<T: Instance> interrupt::typelevel::Handler<T::Interrupt> for InterruptHandl
                 T::state().wraps.fetch_add(1, Ordering::Relaxed);
                 r.dma_if().write(|w| w.set_if_dma_end(true));
             }
-            if ctrl.ie_eoc() {
-                r.ctrl_dma().modify(|w| w.set_ie_eoc(false));
-            }
         } else {
-            if dma_end {
-                // A buffer is full: stop before more conversions.
-                r.ctrl_dma().write(|_| {});
-            } else {
-                r.ctrl_dma().modify(|w| w.set_ie_eoc(false));
-            }
+            // One conversion (`Adc::read`) has ended.
+            r.ctrl_dma().modify(|w| w.set_ie_eoc(false));
             T::Interrupt::disable();
+            T::state().waker.wake();
         }
-        T::state().waker.wake();
     }
 }
 
