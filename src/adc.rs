@@ -39,11 +39,12 @@
 
 use core::future::poll_fn;
 use core::marker::PhantomData;
-use core::sync::atomic::{compiler_fence, AtomicU32, Ordering};
+use core::sync::atomic::{compiler_fence, Ordering};
 use core::task::Poll;
 
 use embassy_hal_internal::drop::OnDrop;
 use embassy_sync::waitqueue::AtomicWaker;
+use portable_atomic::AtomicU32;
 
 use crate::gpio::SealedPin as _;
 use crate::interrupt::typelevel::Interrupt as _;

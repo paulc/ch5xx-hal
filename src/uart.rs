@@ -25,10 +25,11 @@
 
 use core::future::poll_fn;
 use core::marker::PhantomData;
-use core::sync::atomic::{compiler_fence, AtomicBool, Ordering};
+use core::sync::atomic::{compiler_fence, Ordering};
 use core::task::Poll;
 
 use embassy_sync::waitqueue::AtomicWaker;
+use portable_atomic::AtomicBool;
 
 use crate::gpio::{AfType, AnyPin, Pull, SealedPin as _, Speed};
 use crate::interrupt::typelevel::Interrupt as _;

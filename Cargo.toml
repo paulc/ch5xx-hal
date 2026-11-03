@@ -15,12 +15,17 @@ license = "MIT OR Apache-2.0"
 # Local build of ch5xx-data; publish-time this becomes a crates.io version.
 ch5xx-metapac = { path = "../ch5xx-data/build/ch5xx-metapac", features = ["rt"] }
 
-# `unsafe-trust-wch-atomics`: qingke refuses to build whenever the target claims
-# byte atomics unless this is set. The CH5xx target JSON declares atomics (the
-# V3C/V4C cores implement A), so the guard applies. NOTE: the atomics have not
-# been litmus-tested on CH585 or CH592; see the qingke guard's own warning.
+# `unsafe-trust-wch-atomics`: qingke refuses to build for a target with atomics
+# (riscv32imac) unless this is set. On CH592 (QingKe V4C) the AMOs hold, but an
+# LR/SC loop (compare_exchange) loses updates when an interrupt writes the same
+# word between the LR and the SC. Build applications for riscv32imc, where
+# atomic read-modify-writes take a critical section instead (portable-atomic
+# here; embassy's own fallback). Not checked on CH585 (V3C).
 qingke = { version = "0.8.2", features = ["critical-section-impl", "unsafe-trust-wch-atomics"] }
 qingke-rt = { version = "0.8.2", optional = true }
+# Atomic read-modify-writes on riscv32imc, by critical section (native on
+# riscv32imac).
+portable-atomic = { version = "1.11", default-features = false, features = ["critical-section"] }
 
 embedded-hal = "1.0"
 embedded-hal-async = "1.0.0"

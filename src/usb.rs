@@ -36,7 +36,7 @@
 use core::cell::Cell;
 use core::future::poll_fn;
 use core::marker::PhantomData;
-use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use core::sync::atomic::Ordering;
 use core::task::Poll;
 
 use critical_section::Mutex;
@@ -44,6 +44,7 @@ use embassy_sync::waitqueue::AtomicWaker;
 use embassy_usb_driver::{
     Direction, EndpointAddress, EndpointAllocError, EndpointError, EndpointInfo, EndpointType, Event, Unsupported,
 };
+use portable_atomic::{AtomicBool, AtomicU32};
 
 use crate::gpio::{AfType, Pull};
 use crate::interrupt::typelevel::Interrupt as _;
