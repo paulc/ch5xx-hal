@@ -87,6 +87,7 @@ been checked on a WeAct CH592F board by the test examples in `examples/ch592`.
 | `rtc` | counter, alarm, periodic flag, LSI or LSE, LSI calibration | yes |
 | `wdg` | `IndependentWatchdog` (IWDG) | yes |
 | `i2c` | I2C0 master, blocking and async, `embedded-hal(-async)`; on PB15/PB14, so it turns the debug interface off | yes (bus scan) |
+| `soft_i2c` | bit-bang I2C master on any two pins, clocked by TMR0-3, blocking and async, `embedded-hal(-async)`; up to 100 kHz with feature `highcode` | yes (waveform, stretching, errors; devices not yet) |
 | `usb` | full-speed device for `embassy-usb` | yes (CDC-ACM echo; stall and remote wakeup untested) |
 
 Not implemented: BLE, low-power modes, timer PWM DMA, CH585 peripherals.
@@ -141,7 +142,9 @@ Besides `blinky`, `sdi_print`, `defmt_rtt` and `clocks` (which reports the
 clock registers), the CH592 examples are hardware tests that print
 `PASS`/`FAIL` lines over SDI print: `adc`, `capture`, `counter`,
 `embassy_time`, `exti`, `pwm`, `rtc`, `uart_loopback`, `wdg` (which resets the
-chip on purpose), and `spi` and `uart_async`, which need a PA14-PA15 jumper.
+chip on purpose), and `soft_i2c`, `spi` and `uart_async`, which need a
+PA14-PA15 jumper. `soft_i2c_sensors` reads an AHT20 and a BMP280 on PB13
+(SCL) / PB12 (SDA).
 
 `usb_cdc` is a CDC-ACM echo on the USB port; on macOS open
 `/dev/cu.usbmodem*` (the `tty.` node waits for carrier detect, which the

@@ -16,12 +16,12 @@
 //! All chips: [`gpio`], [`delay`], [`rcc`], [`debug`] (SDI print works on
 //! CH592 only).
 //!
-//! CH592: `adc`, `embassy` (time driver), `exti`, `i2c`, `rtc`, `spi`,
-//! `timer` (PWM, input capture with DMA, edge counter), `uart`, `usb`
-//! (`embassy-usb` device) and `wdg`. Where the peripheral exists in ch32-hal
-//! the API follows it; blocking and async (`embedded-hal`,
-//! `embedded-hal-async`, `embedded-io(-async)`) variants are provided where
-//! the hardware allows.
+//! CH592: `adc`, `embassy` (time driver), `exti`, `i2c`, `rtc`, `soft_i2c`
+//! (bit-bang I2C on any pins), `spi`, `timer` (PWM, input capture with DMA,
+//! edge counter), `uart`, `usb` (`embassy-usb` device) and `wdg`. Where the
+//! peripheral exists in ch32-hal the API follows it; blocking and async
+//! (`embedded-hal`, `embedded-hal-async`, `embedded-io(-async)`) variants are
+//! provided where the hardware allows.
 //!
 //! # Features
 //!
@@ -120,6 +120,8 @@ pub mod gpio;
 pub mod i2c;
 #[cfg(ch592)]
 pub mod rtc;
+#[cfg(ch592)]
+pub mod soft_i2c;
 #[cfg(ch592)]
 pub mod spi;
 #[cfg(ch592)]
