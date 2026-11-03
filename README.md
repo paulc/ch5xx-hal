@@ -141,9 +141,9 @@ other.
 Besides `blinky`, `sdi_print`, `defmt_rtt` and `clocks` (which reports the
 clock registers), the CH592 examples are hardware tests that print
 `PASS`/`FAIL` lines over SDI print: `adc`, `capture`, `counter`,
-`embassy_time`, `exti`, `pwm`, `rtc`, `uart_loopback`, `wdg` (which resets the
-chip on purpose), and `soft_i2c`, `spi` and `uart_async`, which need a
-PA14-PA15 jumper. `soft_i2c_sensors` reads an AHT20 and a BMP280 on PB13
+`embassy_time`, `exti`, `pwm`, `rtc`, `uart_loopback`, `wake_race`, `wdg`
+(which resets the chip on purpose), and `soft_i2c`, `spi` and `uart_async`,
+which need a PA14-PA15 jumper. `soft_i2c_sensors` reads an AHT20 and a BMP280 on PB13
 (SCL) / PB12 (SDA).
 
 `usb_cdc` is a CDC-ACM echo on the USB port; on macOS open
