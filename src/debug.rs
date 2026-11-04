@@ -4,11 +4,14 @@
 //! WCH-LinkE's virtual serial port: up to 7 bytes per transfer, byte 0 of
 //! `DATA0` holding the length, `DATA0` written last.
 //!
-//! - **CH592** (QingKe V4C) maps them at `0xE000_0380`, like CH32V20x/V30x, and
-//!   SDI print works (`wlink --enable-sdi-print --watch-serial`; wlink 0.1.3
-//!   needs `RiscvChip::CH59X` added to `support_sdi_print()`).
-//! - **CH585** (QingKe V3C) has no memory-mapped `DATA0`/`DATA1`, so
-//!   [`SDIPrint`] discards everything there. Use `defmt` over RTT instead.
+//! - **CH592** (QingKe V4C) maps them at `0xE000_0380`, like CH32V20x/V30x.
+//! - **CH584/CH585** (QingKe V3C) map them at `0xE000_0340`
+//!   (`hartinfo.dataaddr` = 0x340, as `wlink --chip CH585 status` reports).
+//!
+//! WCH documents SDI print for neither, but it works on both
+//! (`wlink --enable-sdi-print --watch-serial`). wlink 0.1.3 refuses to arm it
+//! for `CH59X` and `CH585`: add them to `support_sdi_print()` in wlink's
+//! `src/lib.rs`.
 //!
 //! Ported from ch32-hal's `debug` module; see also
 //! <https://github.com/openwch/ch32v003/blob/main/EVT/EXAM/SDI_Printf/SDI_Printf/Debug/debug.c>
@@ -20,22 +23,24 @@ pub struct SDIPrint;
 /// because each iteration is a *debug-module* read, which is far slower than a
 /// normal load, and deliberately *not* remembered across calls: a console that
 /// attaches later must still receive output, so each message pays its own budget.
-#[cfg(ch592)]
 const SPINS: u32 = 20_000;
 
 /// Polls [`sdi_write`] allows per chunk before deciding no debugger is
 /// draining the console. Paid once: the verdict sticks until
 /// [`SDIPrint::enable`].
-#[cfg(ch592)]
 const SPIN_LIMIT: u32 = 100_000;
 
 /// Cleared by [`sdi_write`] when the debugger stops draining the console.
-#[cfg(ch592)]
 static SDI_ALIVE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(true);
 
-#[cfg(ch592)]
 mod imp {
+    #[cfg(ch592)]
     use qingke::dm::{DATA0, DATA1};
+    // qingke has no `dm` constants for V3C yet.
+    #[cfg(any(ch584, ch585))]
+    const DATA0: u32 = 0xE000_0340;
+    #[cfg(any(ch584, ch585))]
+    const DATA1: u32 = DATA0 + 4;
 
     const DEBUG_DATA0_ADDRESS: *mut u32 = DATA0 as *mut u32;
     const DEBUG_DATA1_ADDRESS: *mut u32 = DATA1 as *mut u32;
@@ -114,27 +119,10 @@ mod imp {
     use core::sync::atomic::Ordering::Relaxed;
 }
 
-#[cfg(not(ch592))]
-mod imp {
-    pub(super) fn enable() {}
-
-    #[inline]
-    pub(super) fn is_busy() -> bool {
-        false
-    }
-
-    pub(super) fn write(_s: &str, _spins: Option<u32>) -> core::fmt::Result {
-        Ok(())
-    }
-
-    pub(super) fn write_raw(_bytes: &[u8]) {}
-}
-
 impl SDIPrint {
     /// Arm the console. Call once before printing. Also re-arms
     /// [`sdi_write`] after it has given up.
     pub fn enable() {
-        #[cfg(ch592)]
         SDI_ALIVE.store(true, core::sync::atomic::Ordering::Relaxed);
         imp::enable()
     }
@@ -152,10 +140,7 @@ impl SDIPrint {
     /// (`wlink --enable-sdi-print`). With it disarmed the blocking
     /// [`core::fmt::Write`] impl spins forever on the second chunk.
     pub fn write_str_lossy(s: &str) -> core::fmt::Result {
-        #[cfg(ch592)]
-        return imp::write(s, Some(SPINS));
-        #[cfg(not(ch592))]
-        return imp::write(s, None);
+        imp::write(s, Some(SPINS))
     }
 }
 
@@ -166,8 +151,6 @@ impl SDIPrint {
 /// call returns at once, until [`SDIPrint::enable`] re-arms it. So a debugger
 /// that attaches after that sees nothing from `sdi_write`; the
 /// [`crate::println!`] family is unaffected.
-///
-/// Discards everything on CH585 (see the [module docs](self)).
 pub fn sdi_write(bytes: &[u8]) {
     imp::write_raw(bytes)
 }
