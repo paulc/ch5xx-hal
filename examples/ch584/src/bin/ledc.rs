@@ -16,6 +16,7 @@ use embassy_futures::join::join;
 use embassy_futures::select::{select, Either};
 use embassy_time::{Instant, Timer};
 use hal::debug::SDIPrint;
+use hal::gpio::{Input, Pull};
 use hal::ledc::{self, BitOrder, DataPins, Lanes, Ledc};
 use hal::time::Hertz;
 use hal::{bind_interrupts, pac};
@@ -214,13 +215,16 @@ async fn main(_spawner: Spawner) -> ! {
 
     // Other lane counts: 3 words of ones are 96, 48 or 24 bit times (less
     // up to 8 missed at the start); lane 4 is not used and stays low. Without
-    // a lane-4 pin, as those modes leave it out.
+    // a lane-4 pin, as those modes leave it out, and pulled down so the check
+    // does not read a floating pad. (Input has no drop; Ledc sets the pin up
+    // again when it next takes it.)
     let big = unsafe { &mut *core::ptr::addr_of_mut!(BIG) };
     for (i, w) in big.iter_mut().enumerate() {
         *w = (i as u32).wrapping_mul(0x9e37_79b9);
     }
     for (lanes, bits) in [(Lanes::One, 96), (Lanes::Two, 48), (Lanes::Four, 24)] {
         drop(led);
+        let _ = Input::new(p.PA5.reborrow(), Pull::Down);
         config.lanes = lanes;
         led = Ledc::new(p.LED.reborrow(), p.PA4.reborrow(), DataPins::new(), Irqs, config);
         let ones = [0xffff_ffffu32; 3];
