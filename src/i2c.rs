@@ -22,6 +22,7 @@
 
 use core::future::poll_fn;
 use core::marker::PhantomData;
+use core::sync::atomic::{AtomicBool, Ordering};
 use core::task::Poll;
 
 use embassy_sync::waitqueue::AtomicWaker;
@@ -254,15 +255,54 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
     /// Wait until a previously requested STOP has been generated and HW has
     /// cleared CTRL1.STOP, so the next START's read-modify-write cannot write
     /// STOP back (ch32-hal#221).
+    ///
+    /// A STOP requested once the peripheral has already let go of an idle bus
+    /// is never generated, and would hold off every later START: clear it.
+    /// Seen at 400 kHz after a NACK, on CH584 with only the pins' pull-ups.
     fn wait_stop_finished(timeout: Timeout) -> Result<(), Error> {
-        while T::regs().ctrl1().read().stop() {
+        let regs = T::regs();
+        while regs.ctrl1().read().stop() {
+            if !regs.star2().read().busy() {
+                regs.ctrl1().modify(|w| w.set_stop(false));
+                break;
+            }
             timeout.check()?;
         }
         Ok(())
     }
 
+    /// Reset the peripheral, keeping its clock setup. After a timeout it may
+    /// hold a START that never goes out, or see the bus busy for good (a START
+    /// requested while SCL was held low), so the next transfer would time out
+    /// too. Done at the next START rather than at the timeout: while the
+    /// fault lasts, a reset sees the bus busy again.
+    fn reset() {
+        let regs = T::regs();
+        let (freq, ckcfgr, rtr) = (regs.ctrl2().read().freq(), regs.ckcfgr().read(), regs.rtr().read());
+        regs.ctrl1().modify(|w| w.set_swrst(true));
+        regs.ctrl1().modify(|w| w.set_swrst(false));
+        regs.ctrl2().modify(|w| w.set_freq(freq));
+        regs.rtr().write_value(rtr);
+        regs.ckcfgr().write_value(ckcfgr);
+        regs.ctrl1().modify(|w| w.set_pe(true));
+    }
+
+    /// Pass `r` on; after a timeout, have the next START reset the
+    /// peripheral first.
+    fn recover<R>(r: Result<R, Error>) -> Result<R, Error> {
+        if matches!(r, Err(Error::Timeout)) {
+            T::state().reset_pending.store(true, Ordering::Relaxed);
+        }
+        r
+    }
+
     /// Issue a START (optionally with ACK) only after any pending STOP finishes.
     fn launch_start(ack: bool, timeout: Timeout) -> Result<(), Error> {
+        let state = T::state();
+        if state.reset_pending.load(Ordering::Relaxed) {
+            state.reset_pending.store(false, Ordering::Relaxed);
+            Self::reset();
+        }
         Self::wait_stop_finished(timeout)?;
         T::regs().ctrl1().modify(|reg| {
             reg.set_start(true);
@@ -455,12 +495,14 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
 
     /// Blocking read.
     pub fn blocking_read(&mut self, addr: u8, read: &mut [u8]) -> Result<(), Error> {
-        self.blocking_read_timeout(addr, read, self.timeout(), FrameOptions::FirstAndLastFrame)
+        let timeout = self.timeout();
+        Self::recover(self.blocking_read_timeout(addr, read, timeout, FrameOptions::FirstAndLastFrame))
     }
 
     /// Blocking write.
     pub fn blocking_write(&mut self, addr: u8, write: &[u8]) -> Result<(), Error> {
-        self.write_bytes(addr, write, self.timeout(), FrameOptions::FirstAndLastFrame)
+        let timeout = self.timeout();
+        Self::recover(self.write_bytes(addr, write, timeout, FrameOptions::FirstAndLastFrame))
     }
 
     /// Blocking write, restart, read.
@@ -473,10 +515,10 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
 
         let timeout = self.timeout();
 
-        self.write_bytes(addr, write, timeout, FrameOptions::FirstFrame)?;
-        self.blocking_read_timeout(addr, read, timeout, FrameOptions::FirstAndLastFrame)?;
-
-        Ok(())
+        Self::recover(
+            self.write_bytes(addr, write, timeout, FrameOptions::FirstFrame)
+                .and_then(|()| self.blocking_read_timeout(addr, read, timeout, FrameOptions::FirstAndLastFrame)),
+        )
     }
 
     /// Blocking transaction with operations.
@@ -488,10 +530,10 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
         let timeout = self.timeout();
 
         for (op, frame) in operation_frames(operations)? {
-            match op {
-                Operation::Read(read) => self.blocking_read_timeout(addr, read, timeout, frame)?,
-                Operation::Write(write) => self.write_bytes(addr, write, timeout, frame)?,
-            }
+            Self::recover(match op {
+                Operation::Read(read) => self.blocking_read_timeout(addr, read, timeout, frame),
+                Operation::Write(write) => self.write_bytes(addr, write, timeout, frame),
+            })?;
         }
 
         Ok(())
@@ -583,12 +625,12 @@ impl<'d, T: Instance> I2c<'d, T, Async> {
 
     /// Write.
     pub async fn write(&mut self, address: u8, write: &[u8]) -> Result<(), Error> {
-        self.write_frame(address, write, FrameOptions::FirstAndLastFrame).await
+        Self::recover(self.write_frame(address, write, FrameOptions::FirstAndLastFrame).await)
     }
 
     /// Read.
     pub async fn read(&mut self, address: u8, buffer: &mut [u8]) -> Result<(), Error> {
-        self.read_frame(address, buffer, FrameOptions::FirstAndLastFrame).await
+        Self::recover(self.read_frame(address, buffer, FrameOptions::FirstAndLastFrame).await)
     }
 
     async fn read_frame(&mut self, address: u8, buffer: &mut [u8], frame: FrameOptions) -> Result<(), Error> {
@@ -654,8 +696,8 @@ impl<'d, T: Instance> I2c<'d, T, Async> {
             return Err(Error::Overrun);
         }
 
-        self.write_frame(address, write, FrameOptions::FirstFrame).await?;
-        self.read_frame(address, read, FrameOptions::FirstAndLastFrame).await
+        Self::recover(self.write_frame(address, write, FrameOptions::FirstFrame).await)?;
+        Self::recover(self.read_frame(address, read, FrameOptions::FirstAndLastFrame).await)
     }
 
     /// Transaction with operations.
@@ -665,10 +707,10 @@ impl<'d, T: Instance> I2c<'d, T, Async> {
     /// [transaction contract]: embedded_hal::i2c::I2c::transaction
     pub async fn transaction(&mut self, addr: u8, operations: &mut [Operation<'_>]) -> Result<(), Error> {
         for (op, frame) in operation_frames(operations)? {
-            match op {
-                Operation::Read(read) => self.read_frame(addr, read, frame).await?,
-                Operation::Write(write) => self.write_frame(addr, write, frame).await?,
-            }
+            Self::recover(match op {
+                Operation::Read(read) => self.read_frame(addr, read, frame).await,
+                Operation::Write(write) => self.write_frame(addr, write, frame).await,
+            })?;
         }
 
         Ok(())
@@ -688,12 +730,15 @@ impl<'d, T: Instance, M: Mode> Drop for I2c<'d, T, M> {
 
 struct State {
     waker: AtomicWaker,
+    /// A transfer timed out: reset the peripheral before the next START.
+    reset_pending: AtomicBool,
 }
 
 impl State {
     const fn new() -> Self {
         Self {
             waker: AtomicWaker::new(),
+            reset_pending: AtomicBool::new(false),
         }
     }
 }
