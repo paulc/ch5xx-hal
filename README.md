@@ -111,7 +111,7 @@ board by the test examples in `examples/ch592` and `examples/ch584`.
 | `soft_i2c` | bit-bang I2C master on any two pins, clocked by TMR0-3, blocking and async, `embedded-hal(-async)`; up to 100 kHz with feature `highcode` | yes (waveform, stretching, errors; devices not yet) | yes (as CH592) |
 | `usb` | full-speed device for `embassy-usb` (`USBFS` on CH584/CH585) | yes (CDC-ACM echo; stall and remote wakeup untested) | enumerates (echo untested) |
 | `ledc` | LED screen controller (CH584/CH585): clock plus 1/2/4/8 data lanes, blocking (FIFO) and async (DMA) | - | yes (clock and lane 4, the only data pin the CH584F bonds; WCH supports the block on QFN48 parts only) |
-| `ble` | WCH's BLE library (vendored): FFI bindings (TMOS, GAP, GATT), init, a GATT server and peripheral helpers, advertising data builder; with `embassy::Executor`, sleep between BLE events (features `ble`, `executor`) | builds; not yet run | advertising, sleeping between events (`ble_sleep`); connections not yet tested |
+| `ble` | WCH's BLE library (vendored): FFI bindings (TMOS, GAP, GATT), init, a GATT server and peripheral helpers, advertising data builder; with `embassy::Executor`, sleep between BLE events (features `ble`, `executor`) | builds; not yet run | advertising, sleeping between events (`ble_sleep`); `ble_peripheral` connected from macOS (`blescan`): discovery, read, write, notify |
 | `pwr` | DC-DC converter; idle, halt, sleep and shutdown modes with GPIO/RTC/USB/battery wake-up; battery voltage monitor; reset reason | not yet (`pwr` example) | yes (`pwr`, `sleep_current` examples) |
 
 Not implemented: timer PWM DMA, and on CH584/CH585 USBHS, SPI1, LCD and
