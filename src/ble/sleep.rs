@@ -11,8 +11,11 @@
 //!
 //! - It sleeps only if no task is ready and the wake-up is at least
 //!   [`WAKE_EARLY`] + [`SLEEP_MIN`] away. The RTC trigger ends the sleep
-//!   [`WAKE_EARLY`] early, for the 32 MHz crystal to restart (which
-//!   [`pwr::sleep`] waits out on the HSI). What is left until the event
+//!   [`WAKE_EARLY`] early, for the 32 MHz crystal to restart. On
+//!   CH584/CH585 the chip waits for it in halt on the HSI at 4 MHz, until
+//!   the event, as WCH does. On CH592 [`pwr::sleep`] waits for it on the
+//!   HSI at full speed (WCH's CH592 code starts the crystal early instead,
+//!   `RB_XT_PRE_EN`, not done here yet), and what is left until the event
 //!   passes in the short wait below.
 //! - Otherwise it waits in `wfi` for an interrupt: the RTC trigger at the
 //!   TMOS event, the SysTick alarm, the radio, a peripheral. So it does
@@ -46,9 +49,14 @@ const fn us_to_rtc(us: u32) -> u32 {
     (us as u64 * CLOCK_HZ as u64 / 1_000_000) as u32
 }
 
+/// How long before an event the sleep ends, for the crystal to restart:
+/// 1.6 ms (`WAKE_UP_RTC_MAX_TIME` in WCH's `CONFIG.h`).
+#[cfg(any(ch584, ch585))]
+pub const WAKE_EARLY: u32 = us_to_rtc(1600);
 /// How long before an event the sleep ends: [`pwr::sleep`] runs 1.6 ms on
-/// the HSI while the crystal restarts (`WAKE_UP_RTC_MAX_TIME` in WCH's
-/// `SLEEP.h`), plus time to spare for the wake-up and the radio re-init.
+/// the HSI while the crystal restarts, plus time to spare for the wake-up
+/// and the radio re-init.
+#[cfg(ch592)]
 pub const WAKE_EARLY: u32 = us_to_rtc(2000);
 /// The shortest sleep worth taking (`SLEEP_RTC_MIN_TIME`).
 pub const SLEEP_MIN: u32 = us_to_rtc(1000);
@@ -181,6 +189,9 @@ fn idle_cs(cs: CriticalSection, time: u32) -> u32 {
     set_trigger(diff(target, WAKE_EARLY));
     let mut config = SleepConfig::default();
     config.usb_ble = true;
+    #[cfg(any(ch584, ch585))]
+    pwr::sleep_until(config, target);
+    #[cfg(ch592)]
     pwr::sleep(config);
     let t1 = next_tick();
 
@@ -188,5 +199,10 @@ fn idle_cs(cs: CriticalSection, time: u32) -> u32 {
     let slept = diff(t1, t0) as u64;
     time_driver::set_count(cs, c0 + slept * hz / CLOCK_HZ as u64);
     count(&STATS.sleeps);
+    let slept_total = &STATS.slept;
+    slept_total.store(
+        slept_total.load(Ordering::Relaxed).wrapping_add(slept as u32),
+        Ordering::Relaxed,
+    );
     0
 }

@@ -42,13 +42,13 @@ mod irq;
 pub mod peripheral;
 #[cfg(feature = "executor")]
 pub mod sleep;
-#[cfg(feature = "executor")]
-pub(crate) use sleep::executor_idle;
-
 use core::ffi::CStr;
 use core::mem::MaybeUninit;
 use core::num::NonZeroU8;
 use core::sync::atomic::{AtomicU32, Ordering};
+
+#[cfg(feature = "executor")]
+pub(crate) use sleep::executor_idle;
 
 use self::ffi::*;
 use crate::rtc::{self, ClockSource, Rtc};
@@ -78,7 +78,7 @@ const RTC_MAX_COUNT: u32 = 0xA8C0_0000;
 const CLOCK_HZ: u16 = 32_768;
 
 /// Event counters, for diagnostics; prints as
-/// `tmos=.. lle=.. deferred=.. rtc_irq=.. sleeps=.. waits=.. clock=..`.
+/// `tmos=.. lle=.. deferred=.. rtc_irq=.. sleeps=.. slept=.. waits=.. clock=..`.
 ///
 /// - `tmos`: `TMOS_SystemProcess` calls from [`run`] or the executor: how
 ///   often TMOS got the CPU.
@@ -88,6 +88,8 @@ const CLOCK_HZ: u16 = 32_768;
 ///   finished.
 /// - `rtc_irq`: RTC interrupts (the library pends it to have TMOS run).
 /// - `sleeps`: times the chip slept between events ([`sleep`]).
+/// - `slept`: time spent in those sleeps (and the halts that end them), in
+///   1/32768 s; printed in ms.
 /// - `waits`: times TMOS waited in `wfi`, the next event being too close to
 ///   sleep.
 /// - `clock`: the TMOS clock, the RTC time of day in 1/32768 s.
@@ -95,6 +97,7 @@ pub struct Stats {
     pub tmos_passes: AtomicU32,
     pub rtc_irqs: AtomicU32,
     pub sleeps: AtomicU32,
+    pub slept: AtomicU32,
     pub waits: AtomicU32,
 }
 
@@ -102,6 +105,7 @@ pub static STATS: Stats = Stats {
     tmos_passes: AtomicU32::new(0),
     rtc_irqs: AtomicU32::new(0),
     sleeps: AtomicU32::new(0),
+    slept: AtomicU32::new(0),
     waits: AtomicU32::new(0),
 };
 
@@ -126,12 +130,13 @@ impl core::fmt::Display for Stats {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
-            "tmos={} lle={} deferred={} rtc_irq={} sleeps={} waits={} clock={}",
+            "tmos={} lle={} deferred={} rtc_irq={} sleeps={} slept={}ms waits={} clock={}",
             self.tmos_passes.load(Ordering::Relaxed),
             self.lle_irqs(),
             self.lle_deferred(),
             self.rtc_irqs.load(Ordering::Relaxed),
             self.sleeps.load(Ordering::Relaxed),
+            self.slept.load(Ordering::Relaxed) as u64 * 1000 / CLOCK_HZ as u64,
             self.waits.load(Ordering::Relaxed),
             clock(),
         )

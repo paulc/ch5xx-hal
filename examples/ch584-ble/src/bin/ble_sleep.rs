@@ -3,6 +3,7 @@
 //! then turns sleep off and reports:
 //!
 //! - the chip slept between advertising events, and advertising went on;
+//! - it was asleep (or in the halt that ends a sleep) 95% of the time;
 //! - embassy time kept step with the RTC (within 100 ppm);
 //! - each timer, measured on the RTC, took what it asked for (within
 //!   0.5 ms).
@@ -12,7 +13,8 @@
 //! registers, for `wlink regs` once it is done (about 25 s after the
 //! reset; wlink's halt overwrites a0-a4): a6 0x600d when done, a7 checks
 //! passed, s2 checks failed, s3 sleeps, s4 LLE interrupts, s5 embassy
-//! minus RTC time (us), s6 the worst timer error (us).
+//! minus RTC time (us), s6 the worst timer error (us), s7 the time asleep
+//! (per mille).
 //!
 //! hw-test: manual. Its result is on the UART.
 
@@ -117,7 +119,7 @@ async fn main(_spawner: Spawner) -> ! {
     println!("sleeping for about 20 s");
 
     let stats = &ble::STATS;
-    let (sleeps0, lle0) = (load(&stats.sleeps), stats.lle_irqs());
+    let (sleeps0, lle0, slept0) = (load(&stats.sleeps), stats.lle_irqs(), load(&stats.slept));
     let (t0, c0) = (Instant::now(), ble::clock());
     sleep::set_enabled(true);
 
@@ -133,6 +135,8 @@ async fn main(_spawner: Spawner) -> ! {
     let elapsed = t0.elapsed().as_micros() as i64;
     let rtc = rtc_us(ble::clock().wrapping_sub(c0));
     let (sleeps, lle) = (load(&stats.sleeps) - sleeps0, stats.lle_irqs() - lle0);
+    // Per mille of the time asleep (or in the halt that ends a sleep).
+    let asleep = rtc_us(load(&stats.slept) - slept0) * 1000 / rtc;
 
     sleep::set_enabled(false);
     println!("awake: {}", stats);
@@ -143,6 +147,8 @@ async fn main(_spawner: Spawner) -> ! {
     // interrupts.
     check!(sleeps as i64 >= 5 * secs, "{} sleeps in {} s", sleeps, secs);
     check!(lle as i64 >= 20 * secs, "{} LLE interrupts in {} s", lle, secs);
+    // On a CH584F: 988 (about 1.2 ms awake per advertising event).
+    check!(asleep >= 950, "asleep {} per mille of the time", asleep);
     check!(
         unsafe { STATE } & GAPROLE_STATE_ADV_MASK == GAPROLE_ADVERTISING,
         "still advertising"
@@ -182,6 +188,7 @@ async fn main(_spawner: Spawner) -> ! {
             in("s4") lle,
             in("s5") drift as i32,
             in("s6") worst as i32,
+            in("s7") asleep as i32,
             options(noreturn),
         )
     }

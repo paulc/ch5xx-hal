@@ -327,6 +327,31 @@ pub fn sleep(config: SleepConfig) {
     })
 }
 
+/// [`sleep`], for a wake-up at RTC time `at` (`CNT_2S:CNT_32K`), with the
+/// RTC trigger already set a little before it, as WCH's `CH58x_LowPower`
+/// (CH584/CH585): when the trigger ends the sleep, the chip waits for the
+/// crystal in halt, on the HSI at 4 MHz, with the trigger moved to `at`,
+/// rather than running on the HSI until the crystal is ready. Woken by
+/// anything else (or with `at` too close to wait for), it carries on as
+/// [`sleep`] does. For `ble::sleep`.
+#[cfg(all(feature = "ble", feature = "executor", sys_ch585))]
+pub(crate) fn sleep_until(config: SleepConfig, at: u32) {
+    let mut plan = PWR_RAM_MAIN | PWR_RAM_RETENTION;
+    if config.flash {
+        plan |= PWR_XROM;
+    }
+    if config.usb_ble {
+        plan |= PWR_EXTEND;
+    }
+    let us = chip::wake_us(config.flash);
+    let cycles = (crate::rcc::clocks().sysclk.0 as u64 * us as u64 / 1_000_000) as u32;
+    critical_section::with(|_| unsafe {
+        let systick = SysTickState::save();
+        chip::sleep_until_ram(plan, cycles, at);
+        systick.restore();
+    })
+}
+
 /// The SysTick registers, which sleep clears.
 struct SysTickState {
     ctlr: u32,
@@ -479,6 +504,18 @@ unsafe fn begin() {
         let s = rd(PFIC_SCTLR) & !(SCTLR_SLEEPDEEP | SCTLR_SETEVENT);
         wr(PFIC_SCTLR, s | SCTLR_WFITOWFE | SCTLR_SEVONPEND);
         wr(PFIC_SCTLR, s | SCTLR_WFITOWFE | SCTLR_SEVONPEND | SCTLR_SETEVENT);
+        core::arch::asm!("wfi");
+    }
+}
+
+/// Clear the core's event latch (see [`begin`]), so that the next [`wait`]
+/// waits for a new event.
+#[cfg(all(feature = "ble", feature = "executor", sys_ch585))]
+#[inline(always)]
+unsafe fn clear_event() {
+    unsafe {
+        let s = rd(PFIC_SCTLR) & !(SCTLR_SLEEPDEEP | SCTLR_SETEVENT);
+        wr(PFIC_SCTLR, s | SCTLR_SETEVENT);
         core::arch::asm!("wfi");
     }
 }
@@ -757,6 +794,104 @@ mod chip {
             }
             sam! { wr(POWER_PLAN, rd(POWER_PLAN) & !PWR_PLAN_EN); }
             spin(wake_cycles);
+            sam! {
+                wr(CLK_SYS_CFG, clk);
+                wr(HFCK_PWR_CTRL, hfck);
+                wr(XT32M_TUNE, tune);
+                wr(BAT_DET_CTRL, bat);
+            }
+            end();
+        }
+    }
+
+    // The RTC, for `sleep_until_ram`.
+    #[cfg(all(feature = "ble", feature = "executor"))]
+    const RTC_FLAG_CTRL: *mut u8 = 0x4000_1030 as *mut u8;
+    #[cfg(all(feature = "ble", feature = "executor"))]
+    const RTC_TRIG: *mut u32 = 0x4000_1034 as *mut u32;
+    #[cfg(all(feature = "ble", feature = "executor"))]
+    const RTC_CNT_32K: *const u32 = 0x4000_1038 as *const u32;
+    #[cfg(all(feature = "ble", feature = "executor"))]
+    const RB_RTC_TMR_CLR: u8 = 1 << 4;
+    #[cfg(all(feature = "ble", feature = "executor"))]
+    const RB_RTC_TRIG_CLR: u8 = 1 << 5;
+    #[cfg(all(feature = "ble", feature = "executor"))]
+    const RB_RTC_TRIG_FLAG: u8 = 1 << 7;
+    /// The RTC count wraps once a day (`RTC_MAX_COUNT`).
+    #[cfg(all(feature = "ble", feature = "executor"))]
+    const RTC_MAX_COUNT: u32 = 0xa8c0_0000;
+    /// `PFIC_IPRR0`, and the RTC's bit in it (IRQ 28).
+    #[cfg(all(feature = "ble", feature = "executor"))]
+    const PFIC_IPRR0: *mut u32 = 0xe000_e280 as *mut u32;
+    #[cfg(all(feature = "ble", feature = "executor"))]
+    const RTC_IRQ_BIT: u32 = 1 << 28;
+
+    /// [`sleep_until`](super::sleep_until), in RAM: [`sleep_ram`], and when
+    /// the RTC trigger ended the sleep, WCH's `CH58x_LowPower` from there:
+    /// trigger at `at`, keep the crystal running in halt (`XT32M_KEEP`),
+    /// halt (`LowPower_Halt_WFE`), and switch back to the crystal after.
+    #[inline(never)]
+    #[cfg(all(feature = "ble", feature = "executor"))]
+    #[unsafe(link_section = ".data.ch5xx_hal.pwr.sleep_until")]
+    pub(super) unsafe fn sleep_until_ram(keep: u16, wake_cycles: u32, at: u32) {
+        unsafe {
+            begin();
+            let clk = rd(CLK_SYS_CFG);
+            let hfck = rd(HFCK_PWR_CTRL);
+            let cfg = rd(FLASH_CFG);
+            let sck = rd(FLASH_SCK);
+            let tune = rd(XT32M_TUNE);
+            let bat = rd(BAT_DET_CTRL);
+            let hsi_clk = clk & !RB_OSC32M_SEL;
+            sam! {
+                wr(HFCK_PWR_CTRL, hfck | RB_CLK_RC16M_PON);
+                wr(CLK_SYS_CFG, hsi_clk);
+            }
+            sam! {
+                wr(BAT_DET_CTRL, bat_det_while_waiting(bat));
+                wr(XT32M_TUNE, (tune & 0xfc) | 0x03);
+            }
+            deep_sleep(true);
+            let plan = (rd(POWER_PLAN) & (PWR_DCDC_EN | PWR_DCDC_PRE)) | PWR_PLAN_EN | PWR_CORE | PWR_MUST | keep;
+            sam! { wr(POWER_PLAN, plan); }
+            slow_clock(hsi_clk, sck);
+            wait();
+            sam! { wr(POWER_PLAN, rd(POWER_PLAN) & !PWR_PLAN_EN); }
+
+            let mut spin_cycles = wake_cycles;
+            if rd(RTC_FLAG_CTRL) & RB_RTC_TRIG_FLAG != 0 {
+                // Still on the HSI at 4 MHz. Move the trigger to `at` and halt
+                // until it, the crystal starting meanwhile.
+                wr(RTC_FLAG_CTRL, RB_RTC_TMR_CLR | RB_RTC_TRIG_CLR);
+                wr(PFIC_IPRR0, RTC_IRQ_BIT);
+                sam! { wr(RTC_TRIG, at); }
+                sam! { wr(HFCK_PWR_CTRL, rd(HFCK_PWR_CTRL) | RB_CLK_XT32M_KEEP); }
+                // The trigger compares for equality: one that is about to
+                // pass would never fire.
+                let now = rd(RTC_CNT_32K);
+                let left = if at >= now {
+                    at - now
+                } else {
+                    at + (RTC_MAX_COUNT - now)
+                };
+                if left >= 2 && left < RTC_MAX_COUNT / 2 && rd(RTC_FLAG_CTRL) & RB_RTC_TRIG_FLAG == 0 {
+                    flash_park(true);
+                    wr(FLASH_CTRL, 4);
+                    clear_event();
+                    deep_sleep(true);
+                    wait();
+                }
+                // The crystal has been running since the first wake-up.
+                spin_cycles = 0;
+            }
+
+            settle(hsi_clk);
+            sam! {
+                wr(FLASH_CFG, cfg);
+                wr(FLASH_SCK, sck);
+                wr(CLK_SYS_CFG, hsi_clk);
+            }
+            spin(spin_cycles);
             sam! {
                 wr(CLK_SYS_CFG, clk);
                 wr(HFCK_PWR_CTRL, hfck);
