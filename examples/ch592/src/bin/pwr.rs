@@ -3,8 +3,8 @@
 //! the KEY button (PB22) or a 10 s timeout, and finally shutdown, which wakes
 //! as a reset after 1 s and reports from there.
 //!
-//! Results go to SDI print and to UART1 TX on PA9 (115200 8N1): SDI print
-//! stops at the first halt, so read the UART (e.g. PA9 to WCH-LinkE RX, and
+//! Results go to SDI print and to UART0 TX on PB7 (115200 8N1): SDI print
+//! stops at the first halt, so read the UART (e.g. PB7 to WCH-LinkE RX, and
 //! a runner without `--enable-sdi-print`, which then forwards the UART).
 //!
 //! hw-test: manual. It enters the low-power modes, which drop the debug
@@ -24,7 +24,7 @@ use hal::debug::SDIPrint;
 use hal::exti::ExtiInput;
 use hal::gpio::Pull;
 use hal::mode::Blocking;
-use hal::peripherals::UART1;
+use hal::peripherals::UART0;
 use hal::pwr::{
     self, BatteryMonitor, LowPowerLevel, PreciseLevel, ResetReason, ShutdownConfig, SleepConfig, WakeConfig,
 };
@@ -36,7 +36,7 @@ use panic_halt as _;
 const DCDC: bool = false;
 
 /// The UART copy of the output.
-static mut TX: Option<UartTx<'static, UART1, Blocking>> = None;
+static mut TX: Option<UartTx<'static, UART0, Blocking>> = None;
 
 /// Print a line to SDI and to the UART.
 fn out(args: core::fmt::Arguments) {
@@ -126,7 +126,7 @@ async fn main(_spawner: Spawner) -> ! {
         ..Default::default()
     });
     SDIPrint::enable();
-    let tx = UartTx::new_blocking::<0>(p.UART1, p.PA9, uart::Config::default()).unwrap();
+    let tx = UartTx::new_blocking::<0>(p.UART0, p.PB7, uart::Config::default()).unwrap();
     unsafe { *(&raw mut TX) = Some(tx) };
     let mut c = Checks { pass: 0, fail: 0 };
     let mut rtc = Rtc::new(p.RTC, Config::default()).unwrap();

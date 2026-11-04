@@ -226,8 +226,8 @@ need wiring (the PA14-PA15 jumper) say so in their source. Tests marked
 `hw-test: manual` run only when named: `pwr` enters the low-power modes (and,
 with its `DCDC` constant set, the DC-DC converter, which needs the board's
 inductor), and waits up to 10 s for a key press, so give it `SECS=60`. SDI
-print stops at its first halt, so it also writes to UART1 TX on PA9 (115200):
-wire PA9 to WCH-LinkE RX and leave `--enable-sdi-print` out of `RUNNER`.
+print stops at its first halt, so it also writes to UART0 TX on PB7 (115200):
+wire PB7 to WCH-LinkE RX and leave `--enable-sdi-print` out of `RUNNER`.
 
 The examples enable the HAL's `highcode` feature, which runs interrupt entry
 and the functions placed in `.highcode` from RAM: CH592 flash runs code
