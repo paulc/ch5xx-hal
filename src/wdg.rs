@@ -1,4 +1,4 @@
-//! Independent watchdog (CH592)
+//! Independent watchdog
 //!
 //! Follows the STM32 HALs' `IndependentWatchdog`: [`IndependentWatchdog::new`]
 //! sets the timeout, [`start`](IndependentWatchdog::start) starts it and

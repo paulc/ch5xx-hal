@@ -1,4 +1,4 @@
-//! Real-time clock (CH592)
+//! Real-time clock
 //!
 //! The CH5xx RTC is a free-running counter clocked by CK32K (the internal
 //! 32 kHz RC, or a 32.768 kHz crystal on PA10/PA11), not a calendar:

@@ -113,11 +113,11 @@ pub mod delay;
 #[cfg(any(gpio_ch592, gpio_ch585))]
 pub mod exti;
 pub mod gpio;
-#[cfg(ch592)]
+#[cfg(any(sys_ch592, sys_ch585))]
 pub mod i2c;
-#[cfg(ch592)]
+#[cfg(any(sys_ch592, sys_ch585))]
 pub mod rtc;
-#[cfg(ch592)]
+#[cfg(any(tmr_ch592, tmr_ch585))]
 pub mod soft_i2c;
 #[cfg(ch592)]
 pub mod spi;
@@ -126,7 +126,7 @@ pub mod timer;
 pub mod uart;
 #[cfg(ch592)]
 pub mod usb;
-#[cfg(ch592)]
+#[cfg(any(sys_ch592, sys_ch585))]
 pub mod wdg;
 
 pub struct Config {

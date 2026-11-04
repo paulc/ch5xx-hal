@@ -1,8 +1,9 @@
 //! Software ("bit-bang") I2C master on any two GPIOs, clocked by a `TMRx`
-//! timer (CH592).
+//! timer.
 //!
-//! The hardware [`crate::i2c`] only has PB14/PB15, the 2-wire debug link's
-//! pins. This driver runs on any pair of pins instead, up to about 100 kHz.
+//! The hardware [`crate::i2c`] has fixed pins: on CH592 only PB14/PB15, the
+//! 2-wire debug link's. This driver runs on any pair of pins instead, up to
+//! about 100 kHz.
 //!
 //! The timer ticks twice per SCL period and each tick runs one step of a
 //! state machine, which moves SCL or SDA and samples SDA. The async driver

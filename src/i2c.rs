@@ -1,4 +1,4 @@
-//! Inter-Integrated-Circuit (I2C), master (CH592)
+//! Inter-Integrated-Circuit (I2C), master
 //!
 //! The CH5xx I2C is the same STM32F1-style block as the CH32's, so this is
 //! ch32-hal's driver with the CH5xx differences:
@@ -19,6 +19,15 @@
 //! and dropping it turns it back on. That takes the debugger (and SDI
 //! print) off the chip, and needs a part whose lot number supports it; on
 //! older parts disable `CFG_DEBUG_EN` with the ISP tool instead.
+//!
+//! # Pins (CH584/CH585)
+//!
+//! | REMAP | SCL  | SDA  |
+//! |-------|------|------|
+//! | 0     | PB13 | PB12 |
+//! | 1     | PB21 | PB20 |
+//!
+//! CH584F/CH585F bond neither PB20 nor PB21.
 
 use core::future::poll_fn;
 use core::marker::PhantomData;
@@ -154,6 +163,7 @@ impl<'d, T: Instance> I2c<'d, T, Async> {
         freq: Hertz,
         config: Config,
     ) -> Self {
+        apply_remap!();
         let this = Self::new_inner(peri, scl.into(), sda.into(), freq, config);
         T::Interrupt::unpend();
         unsafe { T::Interrupt::enable() };
@@ -170,6 +180,7 @@ impl<'d, T: Instance> I2c<'d, T, Blocking> {
         freq: Hertz,
         config: Config,
     ) -> Self {
+        apply_remap!();
         Self::new_inner(peri, scl.into(), sda.into(), freq, config)
     }
 }
@@ -177,6 +188,7 @@ impl<'d, T: Instance> I2c<'d, T, Blocking> {
 impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
     fn new_inner(peri: Peri<'d, T>, scl: Peri<'d, AnyPin>, sda: Peri<'d, AnyPin>, freq: Hertz, config: Config) -> Self {
         T::enable();
+        #[cfg(ch592)]
         crate::debug::set_debug_interface_enabled(false);
 
         // The peripheral switches its pins to open-drain output when it
@@ -724,6 +736,7 @@ impl<'d, T: Instance, M: Mode> Drop for I2c<'d, T, M> {
         T::regs().ctrl1().modify(|w| w.set_pe(false));
         crate::gpio::SealedPin::set_as_disconnected(&*self._scl);
         crate::gpio::SealedPin::set_as_disconnected(&*self._sda);
+        #[cfg(ch592)]
         crate::debug::set_debug_interface_enabled(true);
     }
 }
@@ -776,18 +789,37 @@ impl Instance for peripherals::I2C0 {
     type Interrupt = crate::interrupt::typelevel::I2C0;
 }
 
-/// I2C0 has no alternate pins.
+/// I2C0 has no alternate pins on CH592.
+#[cfg(ch592)]
 impl crate::peripheral::RemapPeripheral for peripherals::I2C0 {
     fn set_remap(remap: u8) {
         assert!(remap == 0);
     }
 }
 
+#[cfg(any(ch584, ch585))]
+impl crate::peripheral::RemapPeripheral for peripherals::I2C0 {
+    fn set_remap(remap: u8) {
+        crate::sys::set_remap(crate::sys::RemapGroup::I2c, remap)
+    }
+}
+
 pin_trait!(SclPin, Instance);
 pin_trait!(SdaPin, Instance);
 
+#[cfg(ch592)]
 pin_trait_impl!(crate::i2c::SclPin, I2C0, PB15, 0);
+#[cfg(ch592)]
 pin_trait_impl!(crate::i2c::SdaPin, I2C0, PB14, 0);
+
+#[cfg(any(ch584, ch585))]
+pin_trait_impl!(crate::i2c::SclPin, I2C0, PB13, 0);
+#[cfg(any(ch584, ch585))]
+pin_trait_impl!(crate::i2c::SdaPin, I2C0, PB12, 0);
+#[cfg(any(ch584, ch585))]
+pin_trait_impl!(crate::i2c::SclPin, I2C0, PB21, 1);
+#[cfg(any(ch584, ch585))]
+pin_trait_impl!(crate::i2c::SdaPin, I2C0, PB20, 1);
 
 impl embedded_hal::i2c::Error for Error {
     fn kind(&self) -> embedded_hal::i2c::ErrorKind {
