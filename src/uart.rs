@@ -9,8 +9,8 @@
 //! [`UartRx`], `new_blocking`/`new` constructors with a `REMAP` const for the
 //! pin mapping, and [`Config`].
 //!
-//! On CH592, UART0 is the full UART (modem pins, half duplex, internal
-//! loopback); UART1-3 are the "no modem" variant at the same register offsets.
+//! UART0 is the full UART (modem pins, half duplex, internal loopback);
+//! UART1-3 are the "no modem" variant at the same register offsets.
 //! Internal loopback ([`Uart::new_blocking_loopback`]) disconnects the
 //! interrupt, so it only works blocking.
 //!
@@ -22,6 +22,15 @@
 //! | UART1 | PA8 / PA9         | PB12 / PB13       |
 //! | UART2 | PB22 / PB23       | PA6 / PA7         |
 //! | UART3 | PA4 / PA5         | -                 |
+//!
+//! # Pins (CH584/CH585)
+//!
+//! | UART  | REMAP = 0 (RX/TX) | REMAP = 1 (RX/TX) |
+//! |-------|-------------------|-------------------|
+//! | UART0 | PB4 / PB7         | PA15 / PA14       |
+//! | UART1 | PA8 / PA9         | PB12 / PB13       |
+//! | UART2 | PA6 / PA7         | PB22 / PB23       |
+//! | UART3 | PA4 / PA5         | PB20 / PB21       |
 
 use core::future::poll_fn;
 use core::marker::PhantomData;
@@ -982,17 +991,50 @@ mod ch592 {
     pin_trait_impl!(crate::uart::TxPin, UART3, PA5, 0);
 }
 
-// CH585: the instances exist, but its pin map and remap bits are not filled
-// in yet, so no pins implement `RxPin`/`TxPin` there.
-#[cfg(not(ch592))]
-foreach_peripheral!(
-    (uart, $inst:ident) => {
-        impl_instance!($inst, loopback: false, fn enable() {});
+#[cfg(any(ch584, ch585))]
+mod ch585 {
+    use super::*;
+    use crate::sys::{set_clock_enabled, set_remap, ClockGate, RemapGroup};
 
-        impl crate::peripheral::RemapPeripheral for peripherals::$inst {
-            fn set_remap(remap: u8) {
-                assert!(remap == 0, "remap not implemented for this chip");
+    macro_rules! ch585_instance {
+        ($inst:ident, $gate:ident, $remap:ident, loopback: $lb:expr) => {
+            impl_instance!($inst, loopback: $lb,
+                fn enable() {
+                    set_clock_enabled(ClockGate::$gate, true);
+                }
+            );
+
+            impl crate::peripheral::RemapPeripheral for peripherals::$inst {
+                fn set_remap(remap: u8) {
+                    set_remap(RemapGroup::$remap, remap)
+                }
             }
-        }
-    };
-);
+        };
+    }
+
+    ch585_instance!(UART0, Uart0, Uart0, loopback: true);
+    ch585_instance!(UART1, Uart1, Uart1, loopback: false);
+    ch585_instance!(UART2, Uart2, Uart2, loopback: false);
+    ch585_instance!(UART3, Uart3, Uart3, loopback: false);
+
+    // CH585SFR.h, R16_PIN_ALTERNATE. Unlike CH592, UART2 defaults to PA6/PA7.
+    pin_trait_impl!(crate::uart::RxPin, UART0, PB4, 0);
+    pin_trait_impl!(crate::uart::TxPin, UART0, PB7, 0);
+    pin_trait_impl!(crate::uart::RxPin, UART0, PA15, 1);
+    pin_trait_impl!(crate::uart::TxPin, UART0, PA14, 1);
+
+    pin_trait_impl!(crate::uart::RxPin, UART1, PA8, 0);
+    pin_trait_impl!(crate::uart::TxPin, UART1, PA9, 0);
+    pin_trait_impl!(crate::uart::RxPin, UART1, PB12, 1);
+    pin_trait_impl!(crate::uart::TxPin, UART1, PB13, 1);
+
+    pin_trait_impl!(crate::uart::RxPin, UART2, PA6, 0);
+    pin_trait_impl!(crate::uart::TxPin, UART2, PA7, 0);
+    pin_trait_impl!(crate::uart::RxPin, UART2, PB22, 1);
+    pin_trait_impl!(crate::uart::TxPin, UART2, PB23, 1);
+
+    pin_trait_impl!(crate::uart::RxPin, UART3, PA4, 0);
+    pin_trait_impl!(crate::uart::TxPin, UART3, PA5, 0);
+    pin_trait_impl!(crate::uart::RxPin, UART3, PB20, 1);
+    pin_trait_impl!(crate::uart::TxPin, UART3, PB21, 1);
+}
