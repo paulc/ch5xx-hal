@@ -110,11 +110,8 @@ pub mod adc;
 pub mod embassy;
 
 pub mod delay;
-#[cfg(ch592)]
+#[cfg(any(gpio_ch592, gpio_ch585))]
 pub mod exti;
-// Only `exti` and `spi` use it so far, and those are CH592-only.
-#[cfg(not(ch592))]
-use embedded_hal_async as _;
 pub mod gpio;
 #[cfg(ch592)]
 pub mod i2c;
@@ -164,7 +161,7 @@ pub fn init(config: Config) -> Peripherals {
 
     critical_section::with(|cs| unsafe {
         gpio::init(cs);
-        #[cfg(all(ch592, feature = "exti"))]
+        #[cfg(feature = "exti")]
         exti::init(cs);
     });
 

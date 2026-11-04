@@ -7,12 +7,16 @@
 //!
 //! - Polarity is the pin's `OUT` latch (1 = high/rising, 0 = low/falling),
 //!   unused while the pin is an input.
-//! - Any-edge arms the edge away from the current level. The datasheet's
-//!   `INT_EDGE_TYPE` ("non-polarity sensitive") should do both edges, but on a
-//!   CH592F it still fired on the `OUT`-selected edge only, so it is kept
-//!   clear.
+//! - Any-edge arms the edge away from the current level. The CH592
+//!   datasheet's `INT_EDGE_TYPE` ("non-polarity sensitive") should do both
+//!   edges, but on a CH592F it still fired on the `OUT`-selected edge only, so
+//!   it is kept clear. CH584/CH585 have no such register.
 //! - The PB interrupt registers are 16 bits wide: PB22 and PB23 use bits 8 and
-//!   9 (CH592 bonds no PB8/PB9).
+//!   9. CH592 bonds no PB8/PB9. On CH584/CH585, which do, PB8/PB22 and
+//!   PB9/PB23 share those bits through `R16_PIN_ALTERNATE.PIN_INTX`, which
+//!   [`ExtiInput::new`] sets for the pin it is given: only one pin of each
+//!   pair can be an `ExtiInput` at a time. PB16-PB21 have no interrupt there
+//!   (WCH's `GPIOB_ITModeCfg`).
 //!
 //! The `GPIO_A`/`GPIO_B` handlers are defined by this module when the `exti`
 //! feature is on, as in ch32-hal.
@@ -89,10 +93,25 @@ impl<'d> Unpin for ExtiInput<'d> {}
 
 impl<'d> ExtiInput<'d> {
     /// Create an interrupt-capable input on `pin`.
+    ///
+    /// On CH584/CH585, panics for PB16-PB21, which have no interrupt, and
+    /// routes interrupt bit 8 or 9 to `pin` for PB8, PB9, PB22 and PB23 (see
+    /// the [module docs](self)).
     pub fn new<T: GpioPin>(pin: Peri<'d, T>, pull: Pull) -> Self {
-        Self {
-            pin: Input::new(pin, pull),
+        let pin = Input::new(pin, pull);
+        #[cfg(sys_ch585)]
+        if pin.pin.pin.port() == Port::B {
+            match pin.pin.pin.pin() {
+                8 | 9 => critical_section::with(|_| {
+                    pac::SYS.pin_alternate().modify(|w| w.set_pin_intx(false));
+                    pac::SYS.pin_config().modify(|w| w.set_pb16_8_sel(false));
+                }),
+                16..=21 => panic!("PB16-PB21 have no pin interrupt"),
+                22 | 23 => critical_section::with(|_| pac::SYS.pin_alternate().modify(|w| w.set_pin_intx(true))),
+                _ => {}
+            }
         }
+        Self { pin }
     }
 
     pub fn is_high(&self) -> bool {
@@ -220,6 +239,7 @@ impl<'a> ExtiInputFuture<'a> {
             macro_rules! arm {
                 ($mode:ident, $edge_type:ident, $set:ident, $set_f:ident, $clr:ident, $clr_f:ident, $if_:ident, $en:ident) => {{
                     g.$mode().modify(|w| if edge { w.0 |= mask } else { w.0 &= !mask });
+                    #[cfg(gpio_ch592)]
                     g.$edge_type().modify(|w| w.0 &= !mask);
                     // Polarity lives in the (unused, for an input) OUT latch.
                     if high {
