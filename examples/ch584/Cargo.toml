@@ -27,6 +27,13 @@ platform-spin = ["embassy-executor/platform-spin"]
 ## `--no-default-features --features platform-riscv32`.
 platform-riscv32 = ["embassy-executor/platform-riscv32"]
 
+## BLE examples (`ble_*`): WCH's BLE library. Build with `--features ble`.
+ble = ["ch5xx-hal/ble"]
+
+[[bin]]
+name = "ble_adv"
+required-features = ["ble"]
+
 [profile.release]
 strip = false   # symbols are not flashed to the microcontroller, so don't strip them.
 debug = 2
