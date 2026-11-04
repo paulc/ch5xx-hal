@@ -32,6 +32,8 @@
 //! - `embassy`: the `embassy-time` driver on SysTick.
 //! - `executor`: `embassy::Executor`, an embassy executor that sleeps when
 //!   idle (in place of embassy-executor's `platform-*` ones).
+//! - `ble`: the `ble` module, WCH's BLE library and bindings; with
+//!   `executor`, sleep between BLE events.
 //! - `highcode`: interrupt entry and `.highcode` functions run from RAM.
 //! - `exti`: built-in GPIO interrupt handlers for `exti::ExtiInput`.
 //! - `memory-x`: emit `memory.x` for the selected chip.

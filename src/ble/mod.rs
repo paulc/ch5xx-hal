@@ -2,11 +2,16 @@
 //!
 //! The library holds the BLE controller and host, scheduled by WCH's TMOS (a
 //! cooperative event scheduler). The application calls
-//! `TMOS_SystemProcess()` over and over; here [`run`], spawned as an embassy
-//! task, does that, yielding between passes so other tasks run too.
+//! `TMOS_SystemProcess()` over and over. Two ways to do that here:
+//!
+//! - With the `executor` feature, [`crate::embassy::Executor`] runs TMOS
+//!   each time it has polled its tasks, and sleeps between BLE events when
+//!   no task is ready (see [`sleep`]). This is the low-power way.
+//! - With any other executor, spawn [`run`] as a task: it runs TMOS,
+//!   yielding between passes so other tasks run too. The chip never sleeps.
 //!
 //! The library is not re-entrant: call it from thread level only, that is
-//! from embassy tasks or TMOS callbacks (which run inside [`run`]). All tasks
+//! from embassy tasks or TMOS callbacks (which run inside TMOS). All tasks
 //! share one executor, so calls never overlap. The radio interrupts (BB,
 //! LLE) go straight to the library: it points two of the PFIC's
 //! vector-table-free (VTF) slots at its own handlers, which rely on the
@@ -14,7 +19,7 @@
 //!
 //! The TMOS timebase is the RTC (on the 32.768 kHz crystal by default, see
 //! [`Config::clock`]): its time-of-day count, `CNT_2S:CNT_32K`, which wraps
-//! once a day. So [`init`] takes the RTC, and the [`rtc`](crate::rtc) driver
+//! once a day. So [`init`] takes the RTC, and the [`rtc`] driver
 //! cannot be used alongside.
 //!
 //! # Linking
@@ -35,6 +40,10 @@ pub mod gatt;
 pub mod gatt_server;
 mod irq;
 pub mod peripheral;
+#[cfg(feature = "executor")]
+pub mod sleep;
+#[cfg(feature = "executor")]
+pub(crate) use sleep::executor_idle;
 
 use core::ffi::CStr;
 use core::mem::MaybeUninit;
@@ -69,25 +78,44 @@ const RTC_MAX_COUNT: u32 = 0xA8C0_0000;
 const CLOCK_HZ: u16 = 32_768;
 
 /// Event counters, for diagnostics; prints as
-/// `tmos=.. lle=.. deferred=.. rtc_irq=.. clock=..`.
+/// `tmos=.. lle=.. deferred=.. rtc_irq=.. sleeps=.. waits=.. clock=..`.
 ///
-/// - `tmos`: `TMOS_SystemProcess` calls from [`run`]: how often TMOS got
-///   the CPU.
+/// - `tmos`: `TMOS_SystemProcess` calls from [`run`] or the executor: how
+///   often TMOS got the CPU.
 /// - `lle`: link-layer interrupts (radio events: advertising, connection
 ///   events).
 /// - `deferred`: link-layer work the LLE interrupt handed to thread level,
 ///   finished.
 /// - `rtc_irq`: RTC interrupts (the library pends it to have TMOS run).
+/// - `sleeps`: times the chip slept between events ([`sleep`]).
+/// - `waits`: times TMOS waited in `wfi`, the next event being too close to
+///   sleep.
 /// - `clock`: the TMOS clock, the RTC time of day in 1/32768 s.
 pub struct Stats {
     pub tmos_passes: AtomicU32,
     pub rtc_irqs: AtomicU32,
+    pub sleeps: AtomicU32,
+    pub waits: AtomicU32,
 }
 
 pub static STATS: Stats = Stats {
     tmos_passes: AtomicU32::new(0),
     rtc_irqs: AtomicU32::new(0),
+    sleeps: AtomicU32::new(0),
+    waits: AtomicU32::new(0),
 };
+
+impl Stats {
+    /// Link-layer interrupts so far (`lle` above).
+    pub fn lle_irqs(&self) -> u32 {
+        irq::LLE_IRQS.load(Ordering::Relaxed)
+    }
+
+    /// Deferred link-layer work finished so far (`deferred` above).
+    pub fn lle_deferred(&self) -> u32 {
+        irq::LLE_DEFERRED.load(Ordering::Relaxed)
+    }
+}
 
 /// Increment a counter. Each has a single writer, so a load and a store do.
 fn count(counter: &AtomicU32) {
@@ -98,11 +126,13 @@ impl core::fmt::Display for Stats {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
-            "tmos={} lle={} deferred={} rtc_irq={} clock={}",
+            "tmos={} lle={} deferred={} rtc_irq={} sleeps={} waits={} clock={}",
             self.tmos_passes.load(Ordering::Relaxed),
-            irq::LLE_IRQS.load(Ordering::Relaxed),
-            irq::LLE_DEFERRED.load(Ordering::Relaxed),
+            self.lle_irqs(),
+            self.lle_deferred(),
             self.rtc_irqs.load(Ordering::Relaxed),
+            self.sleeps.load(Ordering::Relaxed),
+            self.waits.load(Ordering::Relaxed),
             clock(),
         )
     }
@@ -156,7 +186,8 @@ static mut RTC: MaybeUninit<Rtc<'static>> = MaybeUninit::uninit();
 
 /// Start the RTC clock and initialise the library and TMOS.
 ///
-/// Call after [`crate::init`], then set up a GAP role and spawn [`run`].
+/// Call after [`crate::init`], then set up a GAP role (and spawn [`run`],
+/// unless on [`crate::embassy::Executor`]).
 /// Starting the crystal takes about 500 ms.
 pub fn init(rtc: Peri<'static, peripherals::RTC>, config: Config) -> Result<(), Error> {
     unsafe { load_sections() };
@@ -199,6 +230,10 @@ pub fn init(rtc: Peri<'static, peripherals::RTC>, config: Config) -> Result<(), 
     cfg.srandCB = Some(srand);
     // No temperature sampling (tsCB) or LSI calibration on temperature
     // changes (rcCB); the calibration task below runs every 2 minutes.
+    #[cfg(feature = "executor")]
+    {
+        cfg.idleCB = Some(sleep::idle);
+    }
 
     unsafe {
         irq::init();
@@ -221,6 +256,12 @@ pub fn init(rtc: Peri<'static, peripherals::RTC>, config: Config) -> Result<(), 
 
         // First calibration after 500 ms, as the EVT.
         tmos_start_task(hal_task, HAL_REG_INIT_EVENT, 800);
+    }
+
+    #[cfg(feature = "executor")]
+    {
+        sleep::init();
+        sleep::STARTED.store(true, Ordering::Relaxed);
     }
 
     Ok(())
@@ -255,7 +296,8 @@ unsafe fn load_sections() {
 }
 
 /// Run TMOS forever, yielding to other tasks between passes. Spawn this in
-/// an embassy task after [`init`] and the GAP role setup.
+/// an embassy task after [`init`] and the GAP role setup. Not with
+/// [`crate::embassy::Executor`], which runs TMOS itself.
 pub async fn run() -> ! {
     loop {
         unsafe { TMOS_SystemProcess() };

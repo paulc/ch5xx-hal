@@ -13,6 +13,8 @@ pub mod time_driver_impl;
 mod executor;
 #[cfg(all(feature = "executor", any(systick_ch583, systick_ch585)))]
 pub use executor::Executor;
+#[cfg(all(feature = "executor", feature = "ble", any(systick_ch583, systick_ch585)))]
+pub(crate) use executor::pended;
 
 /// Initialize the Embassy time driver.
 ///

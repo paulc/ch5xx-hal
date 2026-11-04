@@ -259,6 +259,53 @@ impl SystickDriver {
     }
 }
 
+/// For the BLE sleep (`crate::ble::sleep`): the halt and sleep modes stop
+/// the counter, and the idle code moves it on by the time slept.
+#[cfg(all(feature = "executor", feature = "ble"))]
+impl SystickDriver {
+    /// The counter, extended to 64 bits, in HCLK cycles.
+    fn count(&self) -> u64 {
+        self.raw_cnt()
+    }
+
+    /// Set the counter to `cnt`, at or after its present value, and re-arm
+    /// the compare (an alarm the jump passed fires at once).
+    fn set_count(&self, cs: CriticalSection, cnt: u64) {
+        let r = pac::SYSTICK;
+        let ctlr = r.stk_ctlr().read();
+        r.stk_ctlr().modify(|w| w.set_ste(false));
+        r.stk_cntl().write(|w| w.set_cntl(cnt as u32));
+        #[cfg(systick_ch583)]
+        r.stk_cnth().write(|w| w.set_cnth((cnt >> 32) as u32));
+        // `raw_cnt` holds for any count with `period` its half-wraps.
+        #[cfg(systick_ch585)]
+        self.period.store((cnt >> 31) as u32, Ordering::Relaxed);
+        r.stk_ctlr().write_value(ctlr);
+        self.trigger_alarm(cs);
+    }
+
+    /// The next alarm in ticks (`u64::MAX`: none). Alarms already due wake
+    /// their tasks.
+    fn next_alarm(&self, cs: CriticalSection) -> u64 {
+        self.queue.borrow(cs).borrow_mut().next_expiration(self.now())
+    }
+}
+
+#[cfg(all(feature = "executor", feature = "ble"))]
+pub(crate) fn count(_cs: CriticalSection) -> u64 {
+    DRIVER.count()
+}
+
+#[cfg(all(feature = "executor", feature = "ble"))]
+pub(crate) fn set_count(cs: CriticalSection, cnt: u64) {
+    DRIVER.set_count(cs, cnt)
+}
+
+#[cfg(all(feature = "executor", feature = "ble"))]
+pub(crate) fn next_alarm(cs: CriticalSection) -> u64 {
+    DRIVER.next_alarm(cs)
+}
+
 impl Driver for SystickDriver {
     fn now(&self) -> u64 {
         self.cnt_to_ticks(self.raw_cnt())

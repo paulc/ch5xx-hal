@@ -13,10 +13,19 @@ fn __pender(_context: *mut ()) {
     PENDED.store(true, Ordering::SeqCst);
 }
 
+/// Whether a task is ready: the idle code must not sleep then.
+#[cfg(feature = "ble")]
+pub(crate) fn pended() -> bool {
+    PENDED.load(Ordering::SeqCst)
+}
+
 /// A thread-mode embassy executor that sleeps when idle.
 ///
 /// Like embassy's `platform-riscv32` executor it waits in `wfi` when no task
-/// is ready.
+/// is ready. With the `ble` feature, once `ble::init` has run, its
+/// idle loop also runs TMOS, and TMOS's idle callback puts the chip in the
+/// sleep mode until the next BLE event or embassy timer, whichever comes
+/// first (see `ble::sleep`).
 ///
 /// Use it in place of a `platform-*` executor, which this one replaces (both
 /// define `__pender`):
@@ -46,10 +55,15 @@ impl Executor {
         init(self.inner.spawner());
 
         loop {
-            // A wake from here on, by a task or an interrupt, keeps the wait
-            // below from starting and brings the loop round again.
+            // A wake from here on, by a task or an interrupt, keeps the idle
+            // code below from sleeping and brings the loop round again.
             PENDED.store(false, Ordering::SeqCst);
             unsafe { self.inner.poll() };
+
+            #[cfg(feature = "ble")]
+            if crate::ble::executor_idle() {
+                continue;
+            }
 
             critical_section::with(|_| {
                 // A pending interrupt ends the wait even with interrupts

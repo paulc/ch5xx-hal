@@ -64,8 +64,8 @@ rt = ["dep:qingke-rt"]
 ## embassy-time driver on the core SysTick.
 embassy = ["rt", "dep:embassy-time-driver", "dep:embassy-time-queue-utils"]
 ## A thread-mode embassy executor that sleeps when idle
-## (`embassy::Executor`). Replaces embassy-executor's `platform-*`
-## executors.
+## (`embassy::Executor`); with `ble`, it runs TMOS and sleeps between BLE
+## events. Replaces embassy-executor's `platform-*` executors.
 executor = ["embassy", "dep:embassy-executor"]
 ## Built-in GPIO_A/GPIO_B interrupt handlers for `exti::ExtiInput`.
 ## Disable to provide your own.

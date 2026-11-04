@@ -67,7 +67,7 @@ pub const GAP_LINK_PARAM_UPDATE_EVENT: u8 = 0x07;
 /// A scan request was received (if TGAP_ADV_SCAN_REQ_NOTIFY is set)
 pub const GAP_SCAN_REQUEST_EVENT: u8 = 0x19;
 
-/// GAP role state. Bits [3:0] are the advertising state.
+/// GAP role state. Bits 3:0 are the advertising state.
 pub type gapRole_States_t = u32;
 
 pub const GAPROLE_STATE_ADV_MASK: gapRole_States_t = 0xF;
