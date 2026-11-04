@@ -10,10 +10,14 @@
 //! let scan_rsp = AdvData::new().name("ch584-peripheral");
 //! peripheral::start(&peripheral::Config::new("ch584-peripheral", &adv, &scan_rsp), &[&SERVICE])?;
 //!
-//! spawner.spawn(ble_task().unwrap());   // runs ble::run()
+//! // On embassy::Executor TMOS runs by itself; on another executor spawn a
+//! // task running ble::run().
 //! loop {
 //!     match peripheral::next_event().await {
-//!         Event::Connected { handle, .. } => { /* ... */ }
+//!         Event::Connected { handle, .. } => {
+//!             // Later, to save power: 100-200 ms, latency 4, 6 s timeout.
+//!             peripheral::request_conn_params(handle, 80, 160, 4, 600)?;
+//!         }
 //!         Event::Disconnected { .. } => { /* advertising restarts automatically */ }
 //!         _ => {}
 //!     }
@@ -33,6 +37,7 @@
 
 use core::ffi::c_void;
 use core::num::NonZeroU8;
+use core::sync::atomic::{AtomicU8, Ordering};
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
@@ -49,7 +54,9 @@ pub struct Config<'a> {
     pub device_name: &'a str,
     pub adv_data: &'a AdvData,
     pub scan_rsp_data: &'a AdvData,
-    /// Advertising interval, 0.625ms units
+    /// Advertising interval, 0.625ms units. The current while advertising
+    /// goes roughly with the rate: on a CH584F, 50 ms costs about 0.46 mA,
+    /// 22 uC an event.
     pub adv_interval: u16,
     /// Preferred connection interval range, 1.25ms units
     pub min_conn_interval: u16,
@@ -140,7 +147,8 @@ fn send_event(event: Event) {
 }
 
 /// Set up the Peripheral role with `services` and start advertising. Call after
-/// [`super::init`], before spawning the task running [`super::run`].
+/// [`super::init`] (and before spawning the task running [`super::run`], if
+/// one does).
 pub fn start(config: &Config, services: &[&'static Service]) -> Result<(), Error> {
     if config.device_name.len() > GAP_DEVICE_NAME_LEN {
         return Err(Error::NameTooLong);
@@ -181,8 +189,33 @@ pub fn start(config: &Config, services: &[&'static Service]) -> Result<(), Error
         if task_id == INVALID_TASK_ID {
             return Err(Error::TaskRegister);
         }
+        TASK_ID.store(task_id, Ordering::Relaxed);
         GAPRole_PeripheralStartDevice(task_id, &BOND_CBS, &ROLE_CBS)?;
     }
+    Ok(())
+}
+
+/// The role's TMOS task, for [`request_conn_params`].
+static TASK_ID: AtomicU8 = AtomicU8::new(INVALID_TASK_ID);
+
+/// Ask the central of connection `handle` for new connection parameters
+/// (`GAPRole_PeripheralConnParamUpdateReq`): an interval between `min` and
+/// `max` (1.25 ms units), `latency` (connection events the peripheral may
+/// skip when it has nothing to send) and the supervision `timeout` (10 ms
+/// units). The central decides; [`Event::ParamUpdate`] reports what it
+/// chose. A longer interval and some latency save power on a link that
+/// carries little data.
+///
+/// Apple's accessory guidelines accept: `min` at least 15 ms, `max` at
+/// least `min` + 15 ms, `max * (latency + 1)` at most 2 s, `latency` at
+/// most 30, `timeout` between 2 s and 6 s and more than three times
+/// `max * (latency + 1)`. WCH's EVT asks 6.4 s after connecting, once the
+/// central has had time to discover the services at its own interval.
+///
+/// Call from thread level (a task), after [`start`].
+pub fn request_conn_params(handle: u16, min: u16, max: u16, latency: u16, timeout: u16) -> Result<(), Error> {
+    let task_id = TASK_ID.load(Ordering::Relaxed);
+    unsafe { GAPRole_PeripheralConnParamUpdateReq(handle, min, max, latency, timeout, task_id)? };
     Ok(())
 }
 
