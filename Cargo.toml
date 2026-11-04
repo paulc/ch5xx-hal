@@ -20,7 +20,9 @@ ch5xx-metapac = { path = "../ch5xx-data/build/ch5xx-metapac", features = ["rt"] 
 # LR/SC loop (compare_exchange) loses updates when an interrupt writes the same
 # word between the LR and the SC. Build applications for riscv32imc, where
 # atomic read-modify-writes take a critical section instead (portable-atomic
-# here; embassy's own fallback). Not checked on CH585 (V3C).
+# here; embassy's own fallback). CH584/CH585 (QingKe V3C) have no A extension
+# at all (misa 0x40901106): an AMO traps as an illegal instruction, so they
+# must be built for riscv32imc.
 qingke = { version = "0.8.2", features = ["critical-section-impl", "unsafe-trust-wch-atomics"] }
 qingke-rt = { version = "0.8.2", optional = true }
 # Atomic read-modify-writes on riscv32imc, by critical section (native on
