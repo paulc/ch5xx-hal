@@ -26,20 +26,26 @@ use quote::{format_ident, quote};
 fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
-    // Exactly one chip feature, e.g. `ch585`.
-    let chip_name = env::vars()
+    // Exactly one part feature, e.g. `ch584f`. Its die (`ch584`) and the part
+    // itself both become cfgs; drivers use the die, or better the block
+    // versions below.
+    let part = env::vars()
         .map(|(a, _)| a)
         .filter(|x| x.starts_with("CARGO_FEATURE_CH5"))
         .collect::<Vec<_>>();
-    let chip_name = match chip_name.len() {
-        0 => panic!("no ch5xx chip Cargo feature enabled (e.g. `ch585`)"),
-        1 => chip_name[0]
-            .strip_prefix("CARGO_FEATURE_")
-            .unwrap()
-            .to_ascii_lowercase(),
-        _ => panic!("multiple ch5xx chip Cargo features enabled; pick one"),
+    let part = match part.len() {
+        0 => panic!("no ch5xx part Cargo feature enabled (e.g. `ch584f`)"),
+        1 => part[0].strip_prefix("CARGO_FEATURE_").unwrap().to_ascii_lowercase(),
+        _ => panic!("multiple ch5xx part Cargo features enabled; pick one"),
+    };
+    let chip_name = match part.as_str() {
+        "ch584m" | "ch584x" | "ch584f" => "ch584",
+        "ch585m" | "ch585f" | "ch585c" | "ch585d" => "ch585",
+        "ch592x" | "ch592f" | "ch592a" | "ch592d" => "ch592",
+        other => panic!("unknown ch5xx part `{other}`"),
     };
     println!("cargo:rustc-cfg={chip_name}");
+    println!("cargo:rustc-cfg={part}");
 
     // One cfg per register block version, e.g. `adc_ch592`, `sys_ch585`, as
     // embassy-stm32 does (`adc_v3`): drivers gate on the block they program,
@@ -55,14 +61,15 @@ fn main() {
         println!("cargo:rustc-cfg={cfg}");
     }
 
-    // Per-chip bonded GPIO pins. The metadata does not carry pins yet (see
-    // ch5xx-data AGENTS.md, "Pins ... are not in the SVD; leave them for hand
-    // editing"), and the bonded set differs per die, so it lives here until
-    // pins land in the data. Only listed pins get a singleton; for chips sold
-    // in several packages, list the largest package.
-    let ports: &[(char, &[u8])] = match chip_name.as_str() {
-        // CH585M / CH584M (QFN48). CH585F / CH584F (QFN32) bond a subset.
-        "ch584" | "ch585" => &[
+    // Bonded GPIO pins per package, from the datasheets' pin definition
+    // tables (CH585/CH584 DS V1.6, CH592 DS V1.9). The metadata does not
+    // carry pins yet (see ch5xx-data AGENTS.md, "Pins ... are not in the SVD;
+    // leave them for hand editing"), so they live here until pins land in the
+    // data. Only these pins get a singleton, and pin trait impls for any
+    // other pin are left out (`if_pin!`).
+    let ports: &[(char, &[u8])] = match part.as_str() {
+        // QFN48: all 40.
+        "ch584m" | "ch584x" | "ch585m" => &[
             ('A', &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]),
             (
                 'B',
@@ -72,13 +79,31 @@ fn main() {
                 ],
             ),
         ],
-        // CH592X (QFN32), per the DS v1.9 pin description. CH592F/A/D bond a
-        // subset.
-        "ch592" => &[
+        // QFN32: 24. PB9 shares PA9's pad (DS note 4), so only PA9 is listed.
+        "ch584f" | "ch585f" => &[
+            ('A', &[4, 5, 9, 10, 11, 12, 13, 14, 15]),
+            ('B', &[4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 22, 23]),
+        ],
+        // QFN26: 17, with PB9 again on PA9's pad.
+        "ch585c" => &[
+            ('A', &[9, 12, 13, 14, 15]),
+            ('B', &[4, 8, 10, 11, 12, 13, 14, 15, 16, 17, 22, 23]),
+        ],
+        // QFN20: 12.
+        "ch585d" => &[('A', &[9, 12, 13, 14, 15]), ('B', &[10, 11, 12, 13, 14, 15, 22])],
+        // QFN32: 24.
+        "ch592x" => &[
             ('A', &[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]),
             ('B', &[0, 4, 6, 7, 10, 11, 12, 13, 14, 15, 22, 23]),
         ],
-        other => panic!("no GPIO port map for chip `{other}`"),
+        // QFN28: 20.
+        "ch592f" | "ch592a" => &[
+            ('A', &[4, 5, 8, 9, 10, 11, 12, 13, 14, 15]),
+            ('B', &[4, 7, 10, 11, 12, 13, 14, 15, 22, 23]),
+        ],
+        // QFN20: 12.
+        "ch592d" => &[('A', &[10, 11, 12, 13, 14, 15]), ('B', &[10, 11, 12, 13, 14, 15])],
+        other => panic!("no pin list for part `{other}`"),
     };
 
     // Peripheral singletons. Skip the register-less placeholders (BLE) and the
@@ -190,6 +215,15 @@ fn main() {
 
     // ---- write ---------------------------------------------------------
     fs::write(out_dir.join("_generated.rs"), g.to_string()).unwrap();
+    // if_pin!(PA0, item): `item` if the part bonds PA0, else nothing. Drivers
+    // wrap their pin trait impls in it, so a package without a pin simply
+    // lacks the impl, as ch32-hal's generated impls do.
+    m.push_str("#[allow(unused_macros)]\nmacro_rules! if_pin {\n");
+    for (p, ..) in &pins {
+        writeln!(m, "    ({p}, $($t:tt)*) => {{ $($t)* }};").unwrap();
+    }
+    m.push_str("    ($p:ident, $($t:tt)*) => {};\n}\n");
+
     fs::write(out_dir.join("_macros.rs"), m).unwrap();
 
     println!("cargo:rerun-if-changed=build.rs");

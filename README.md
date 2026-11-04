@@ -19,16 +19,26 @@ code serves every supported chip in the family.
 | CH585 | QingKe V3C | As CH584 (CH585 adds USBHS and SPI1, not covered); not tested on a CH585 part |
 | CH592 | QingKe V4C | Peripheral drivers below, tested on a WeAct CH592F board |
 
-Chip support is selected with a Cargo feature (`ch584`, `ch585`, `ch592`).
-Exactly one must be enabled. The chip feature also selects the QingKe core
-for `qingke` / `qingke-rt`. Pin singletons only exist for bonded pins:
+The part is selected with a Cargo feature named after it, as in ch32-hal;
+exactly one must be enabled. It also selects the QingKe core for `qingke` /
+`qingke-rt`, and the package decides which pins exist: only bonded pins get a
+singleton, and pin trait impls for the others are left out, so a driver
+cannot be given a pin the package lacks.
 
-- CH592: the QFN32 (CH592X) set, PA4-PA15, PB0, PB4, PB6, PB7, PB10-PB15,
-  PB22 and PB23. The QFN28 CH592F lacks PA6, PA7, PB0 and PB6, which still
-  get singletons.
-- CH584/CH585: the QFN48 (CH58xM) set, PA0-PA15 and PB0-PB23. The QFN32
-  CH584F/CH585F bonds only PA4, PA5, PA9-PA15, PB4-PB8, PB10-PB17, PB22 and
-  PB23.
+| Feature | Package | GPIO |
+| ------- | ------- | ---- |
+| `ch584m`, `ch584x`, `ch585m` | QFN48 | PA0-PA15, PB0-PB23 |
+| `ch584f`, `ch585f` | QFN32 | PA4, PA5, PA9-PA15, PB4-PB8, PB10-PB17, PB22, PB23 |
+| `ch585c` | QFN26 | PA9, PA12-PA15, PB4, PB8, PB10-PB17, PB22, PB23 |
+| `ch585d` | QFN20 | PA9, PA12-PA15, PB10-PB15, PB22 |
+| `ch592x` | QFN32 | PA4-PA15, PB0, PB4, PB6, PB7, PB10-PB15, PB22, PB23 |
+| `ch592f`, `ch592a` | QFN28 | PA4, PA5, PA8-PA15, PB4, PB7, PB10-PB15, PB22, PB23 |
+| `ch592d` | QFN20 | PA10-PA15, PB10-PB15 |
+
+On the CH58xF and CH585C, PB9 shares PA9's pad (DS note 4); only PA9 gets a
+singleton. Peripherals are not trimmed per package yet: a peripheral whose
+pins are all missing still has a singleton (CH585C/D, for example, have no
+I2C pins).
 
 PB23 is also the RST# input; with `CFG_RESET_EN` set in the user config (as on
 the WeAct boards) it reads high whatever drives it.
@@ -45,8 +55,8 @@ Builds need nightly with `rust-src` (`-Zbuild-std=core`); the example crates
 set this up in `.cargo/config.toml`:
 
 ```console
-cargo +nightly build -Zbuild-std=core --target riscv32imc-unknown-none-elf --release --features ch592
-cargo +nightly build -Zbuild-std=core --target riscv32imc-unknown-none-elf --release --features ch584
+cargo +nightly build -Zbuild-std=core --target riscv32imc-unknown-none-elf --release --features ch592f
+cargo +nightly build -Zbuild-std=core --target riscv32imc-unknown-none-elf --release --features ch584f
 ```
 
 Build for `riscv32imc`: the CH584/CH585 core (V3C) has no A extension, and on
@@ -60,10 +70,10 @@ Both builds write to the same directory, so give the second one its own
 
 ```console
 # CH592: target/riscv32imc-unknown-none-elf/doc/ch5xx_hal/index.html
-cargo +nightly doc -Zbuild-std=core --target riscv32imc-unknown-none-elf --features ch592,embassy,exti --no-deps
+cargo +nightly doc -Zbuild-std=core --target riscv32imc-unknown-none-elf --features ch592f,embassy,exti --no-deps
 
 # CH584: target/doc-ch584/riscv32imc-unknown-none-elf/doc/ch5xx_hal/index.html
-cargo +nightly doc -Zbuild-std=core --target riscv32imc-unknown-none-elf --features ch584,embassy,exti --no-deps --target-dir target/doc-ch584
+cargo +nightly doc -Zbuild-std=core --target riscv32imc-unknown-none-elf --features ch584f,embassy,exti --no-deps --target-dir target/doc-ch584
 ```
 
 Add `--open` to open the result in a browser, or serve the `doc` directory

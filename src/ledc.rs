@@ -451,12 +451,18 @@ pub trait ClkPin: crate::gpio::Pin {}
 /// The data pin for lane `LANE` (`LED<LANE>`).
 pub trait DataPin<const LANE: u8>: crate::gpio::Pin {}
 
-impl ClkPin for peripherals::PA4 {}
-impl DataPin<0> for peripherals::PA0 {}
-impl DataPin<1> for peripherals::PA1 {}
-impl DataPin<2> for peripherals::PA2 {}
-impl DataPin<3> for peripherals::PA3 {}
-impl DataPin<4> for peripherals::PA5 {}
-impl DataPin<5> for peripherals::PA6 {}
-impl DataPin<6> for peripherals::PA7 {}
-impl DataPin<7> for peripherals::PA8 {}
+macro_rules! impl_data_pin {
+    ($pin:ident, $lane:expr) => {
+        if_pin!($pin, impl DataPin<$lane> for peripherals::$pin {});
+    };
+}
+
+if_pin!(PA4, impl ClkPin for peripherals::PA4 {});
+impl_data_pin!(PA0, 0);
+impl_data_pin!(PA1, 1);
+impl_data_pin!(PA2, 2);
+impl_data_pin!(PA3, 3);
+impl_data_pin!(PA5, 4);
+impl_data_pin!(PA6, 5);
+impl_data_pin!(PA7, 6);
+impl_data_pin!(PA8, 7);

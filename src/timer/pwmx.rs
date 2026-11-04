@@ -303,7 +303,7 @@ impl<'a> embedded_hal::pwm::SetDutyCycle for PwmxChannel<'a> {
 
 macro_rules! impl_pwmx_pin {
     ($trait:ident, $pin:ident, $remap:expr) => {
-        impl $trait<$remap> for peripherals::$pin {}
+        if_pin!($pin, impl $trait<$remap> for peripherals::$pin {});
     };
 }
 

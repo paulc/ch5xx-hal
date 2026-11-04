@@ -879,16 +879,18 @@ impl<T: Instance> SealedAdcChannel<T> for Vbat {
 
 macro_rules! impl_adc_pin {
     ($inst:ident, $pin:ident, $ch:expr) => {
-        impl crate::adc::AdcChannel<peripherals::$inst> for Peri<'_, peripherals::$pin> {}
-        impl crate::adc::SealedAdcChannel<peripherals::$inst> for Peri<'_, peripherals::$pin> {
-            fn setup(&mut self) {
-                self.set_as_analog();
-            }
+        if_pin!($pin,
+            impl crate::adc::AdcChannel<peripherals::$inst> for Peri<'_, peripherals::$pin> {}
+            impl crate::adc::SealedAdcChannel<peripherals::$inst> for Peri<'_, peripherals::$pin> {
+                fn setup(&mut self) {
+                    self.set_as_analog();
+                }
 
-            fn channel(&self) -> u8 {
-                $ch
+                fn channel(&self) -> u8 {
+                    $ch
+                }
             }
-        }
+        );
     };
 }
 

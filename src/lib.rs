@@ -25,10 +25,12 @@
 //!
 //! # Features
 //!
-//! - `ch584` / `ch585` / `ch592`: the chip (exactly one).
+//! - the part, exactly one: `ch584m`, `ch584x`, `ch584f`, `ch585m`,
+//!   `ch585f`, `ch585c`, `ch585d`, `ch592x`, `ch592f`, `ch592a`, `ch592d`.
+//!   The package decides which pins exist.
 //! - `rt` (default): `qingke-rt` runtime and interrupt vectors.
-//! - `embassy`: the `embassy-time` driver on SysTick (CH592).
-//! - `exti`: built-in GPIO interrupt handlers for `exti::ExtiInput` (CH592).
+//! - `embassy`: the `embassy-time` driver on SysTick.
+//! - `exti`: built-in GPIO interrupt handlers for `exti::ExtiInput`.
 //! - `memory-x`: emit `memory.x` for the selected chip.
 
 #![no_std]

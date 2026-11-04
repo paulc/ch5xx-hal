@@ -86,7 +86,7 @@ macro_rules! pin_trait {
 
 macro_rules! pin_trait_impl {
     (crate::$mod:ident::$trait:ident, $instance:ident, $pin:ident, $n:expr) => {
-        impl crate::$mod::$trait<crate::peripherals::$instance, $n> for crate::peripherals::$pin {}
+        if_pin!($pin, impl crate::$mod::$trait<crate::peripherals::$instance, $n> for crate::peripherals::$pin {});
     };
 }
 
