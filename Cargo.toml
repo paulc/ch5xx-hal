@@ -23,8 +23,8 @@ ch5xx-metapac = { path = "../ch5xx-data/build/ch5xx-metapac", features = ["rt"] 
 # here; embassy's own fallback). CH584/CH585 (QingKe V3C) have no A extension
 # at all (misa 0x40901106): an AMO traps as an illegal instruction, so they
 # must be built for riscv32imc.
-qingke = { version = "0.8.2", features = ["critical-section-impl", "unsafe-trust-wch-atomics"] }
-qingke-rt = { version = "0.8.2", optional = true }
+qingke = { version = "0.8.3", features = ["critical-section-impl", "unsafe-trust-wch-atomics"] }
+qingke-rt = { version = "0.8.3", optional = true }
 # Atomic read-modify-writes on riscv32imc, by critical section (native on
 # riscv32imac).
 portable-atomic = { version = "1.11", default-features = false, features = ["critical-section"] }
@@ -80,9 +80,3 @@ ch592 = ["ch5xx-metapac/ch592", "qingke-rt?/v4c", "qingke/v4c", "dep:embassy-usb
 ## Emit `memory.x` from the metapac's memory layout, so `qingke-rt`'s `link.x`
 ## can find it. Enable in the binary crate, not the HAL (see ch32-hal).
 memory-x = ["ch5xx-metapac/memory-x"]
-
-# `v3c` landed on qingke's main after the 0.8.2 release, so point at the local
-# checkout until 0.8.3 is published. Drop this block then.
-[patch.crates-io]
-qingke = { path = "../qingke" }
-qingke-rt = { path = "../qingke/qingke-rt" }

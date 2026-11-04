@@ -35,13 +35,11 @@ the WeAct boards) it reads high whatever drives it.
 
 ## Building
 
-The HAL depends on sibling checkouts, not crates.io releases (yet):
-
-- `../ch5xx-data`, with the metapac generated (`./d gen`) into
-  `build/ch5xx-metapac`. CH592 needs the data fixes on its `ch592-ds-v1.9`
-  branch.
-- `../qingke`, for the `v3c`/`v4c` core features, which postdate qingke
-  0.8.2 (see the `[patch.crates-io]` blocks).
+The HAL depends on a sibling checkout of `../ch5xx-data`, not a crates.io
+release (yet), with the metapac generated (`./d gen`) into
+`build/ch5xx-metapac`. CH592 needs the data fixes on its `ch592-ds-v1.9`
+branch. `qingke` / `qingke-rt` come from crates.io (0.8.3, the first release
+with the `v3c`/`v4c` core features).
 
 Builds need nightly with `rust-src` (`-Zbuild-std=core`); the example crates
 set this up in `.cargo/config.toml`:
