@@ -535,15 +535,26 @@ impl<'d> Output<'d> {
     }
 }
 
-/// Enable the GPIO block.
+/// Set up the GPIO block.
 ///
 /// There is no peripheral clock gate to turn on; the CH5xx GPIO is always
-/// clocked. All this does is keep the same call shape as ch32-hal so `init` can
-/// treat it uniformly.
+/// clocked. Every pin comes out of reset as a floating input, the pads the
+/// package does not bond out included: those get a pull-up here, as nothing
+/// else can reach them and floating they draw current (about 27 uA in
+/// shutdown on a CH584F).
 pub(crate) unsafe fn init(_cs: CriticalSection) {
-    // Nothing to program: the CH5xx GPIO block is always clocked and every pin
-    // comes out of reset as a floating input. Kept so `init` has the same shape
-    // as ch32-hal's.
+    let [a, b] = crate::_generated::UNBONDED_PADS;
+    let g = pac::GPIO;
+    if a != 0 {
+        g.pa_pd_drv().modify(|w| w.0 &= !a);
+        g.pa_dir().modify(|w| w.0 &= !a);
+        g.pa_pu().modify(|w| w.0 |= a);
+    }
+    if b != 0 {
+        g.pb_pd_drv().modify(|w| w.0 &= !b);
+        g.pb_dir().modify(|w| w.0 &= !b);
+        g.pb_pu().modify(|w| w.0 |= b);
+    }
 }
 
 // --- embedded-hal impls ---------------------------------------------------

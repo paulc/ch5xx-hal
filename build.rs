@@ -106,6 +106,35 @@ fn main() {
         other => panic!("no pin list for part `{other}`"),
     };
 
+    // Pads on the die that the package does not bond out (PA0-PA15, PB0-PB23
+    // on every part). `gpio::init` pulls them up: left floating they draw
+    // current, about 27 uA in shutdown on a CH584F, which is why WCH's
+    // examples configure `GPIO_Pin_All`. Where PB9 shares PA9's pad (DS note
+    // 4: the two must not both be outputs), PB9 is left to PA9.
+    let shared_pads: &[(char, u8)] = match part.as_str() {
+        "ch584f" | "ch585f" | "ch585c" => &[('B', 9)],
+        _ => &[],
+    };
+    let unbonded: Vec<u32> = [('A', 16u32), ('B', 24)]
+        .iter()
+        .map(|&(port, width)| {
+            let mut mask = (1u32 << width) - 1;
+            for (p, bonded) in ports {
+                if *p == port {
+                    for &n in *bonded {
+                        mask &= !(1 << n);
+                    }
+                }
+            }
+            for &(p, n) in shared_pads {
+                if p == port {
+                    mask &= !(1 << n);
+                }
+            }
+            mask
+        })
+        .collect();
+
     // Peripheral singletons. Skip the register-less placeholders (BLE) and the
     // core-internal blocks (PFIC, SysTick); the HAL never hands those out.
     const SKIP_KINDS: &[&str] = &["pfic", "systick"];
@@ -148,6 +177,12 @@ fn main() {
     g.extend(quote! {
         crate::peripherals_definition!(#(#singleton_tokens,)* #(#pin_tokens),*);
         crate::peripherals_struct!(#(#singleton_tokens,)* #(#pin_tokens),*);
+    });
+
+    let (unbonded_a, unbonded_b) = (unbonded[0], unbonded[1]);
+    g.extend(quote! {
+        /// Pads the package does not bond out, per port (A, B).
+        pub(crate) const UNBONDED_PADS: [u32; 2] = [#unbonded_a, #unbonded_b];
     });
 
     // Interrupt declarations go into their own file: `interrupt_mod!` expands
