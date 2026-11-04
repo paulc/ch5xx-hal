@@ -11,6 +11,7 @@
 # Each test is flashed with SDI print on and its output captured until it
 # reports a result (or SECS seconds pass). The tests are the binaries in
 # src/bin that print PASS/FAIL lines, unless named on the command line.
+# Tests marked "hw-test: manual" (low-power modes, DC-DC) run only when named.
 #
 # Environment:
 #   RUNNER      flash-and-watch command; cargo appends the ELF path. Default:
@@ -47,7 +48,7 @@ runner_var=CARGO_TARGET_$(echo "$target" | tr 'a-z-' 'A-Z_')_RUNNER
 if [ $# -gt 0 ]; then
     tests="$*"
 else
-    tests=$(grep -l 'PASS' src/bin/*.rs | sed 's|.*/||; s|\.rs$||' | sort)
+    tests=$(grep -l 'PASS' src/bin/*.rs | xargs grep -L 'hw-test: manual' | sed 's|.*/||; s|\.rs$||' | sort)
 fi
 
 # The line that ends a test's run.

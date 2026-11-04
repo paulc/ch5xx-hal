@@ -110,6 +110,7 @@ board by the test examples in `examples/ch592` and `examples/ch584`.
 | `soft_i2c` | bit-bang I2C master on any two pins, clocked by TMR0-3, blocking and async, `embedded-hal(-async)`; up to 100 kHz with feature `highcode` | yes (waveform, stretching, errors; devices not yet) | yes (as CH592) |
 | `usb` | full-speed device for `embassy-usb` (`USBFS` on CH584/CH585) | yes (CDC-ACM echo; stall and remote wakeup untested) | enumerates (echo untested) |
 | `ledc` | LED screen controller (CH584/CH585): clock plus 1/2/4/8 data lanes, blocking (FIFO) and async (DMA) | - | yes (clock and lane 4, the only data pin the CH584F bonds; WCH supports the block on QFN48 parts only) |
+| `pwr` | DC-DC converter; idle, halt, sleep and shutdown modes with GPIO/RTC/USB/battery wake-up; battery voltage monitor; reset reason | not yet (`pwr` example) | not yet (`pwr` example) |
 
 Not implemented: BLE, low-power modes, timer PWM DMA, and on CH584/CH585
 USBHS, SPI1, LCD and touch-key.
@@ -221,7 +222,10 @@ It uses the crate's runner with `--enable-sdi-print --watch-serial` added;
 set `RUNNER` to use another (cargo appends the ELF path). The SDI console
 sometimes fails to start, so a test that prints nothing is retried
 (`TRIES`, default 3). Logs go to `<crate>/target/hw-test`. The tests that
-need wiring (the PA14-PA15 jumper) say so in their source.
+need wiring (the PA14-PA15 jumper) say so in their source. Tests marked
+`hw-test: manual` run only when named: `pwr` enters the low-power modes (and,
+with its `DCDC` constant set, the DC-DC converter, which needs the board's
+inductor), and waits up to 10 s for a key press, so give it `SECS=60`.
 
 The examples enable the HAL's `highcode` feature, which runs interrupt entry
 and the functions placed in `.highcode` from RAM: CH592 flash runs code
