@@ -307,7 +307,9 @@ pub fn halt() {
 
 /// Power down everything but the PMU, the core, the peripherals and the SRAM
 /// (and what `config` keeps) until a wake-up source ([`configure_wake`])
-/// fires, as WCH's `LowPower_Sleep`. The program then carries on.
+/// fires, as WCH's `LowPower_Sleep`. The program then carries on. SysTick
+/// loses its registers in sleep; they are put back, so it stands still
+/// across the sleep as it does in [`halt`].
 pub fn sleep(config: SleepConfig) {
     let mut plan = PWR_RAM_MAIN | PWR_RAM_RETENTION;
     if config.flash {
@@ -317,9 +319,52 @@ pub fn sleep(config: SleepConfig) {
         plan |= PWR_EXTEND;
     }
     let us = chip::wake_us(config.flash);
-    let ticks = (crate::delay::ticks_per_sec() as u64 * us as u64 / 1_000_000) as u32;
-    let cnt = pac::SYSTICK.stk_cntl().as_ptr() as *const u32;
-    critical_section::with(|_| unsafe { chip::sleep_ram(plan, ticks, cnt) })
+    let cycles = (crate::rcc::clocks().sysclk.0 as u64 * us as u64 / 1_000_000) as u32;
+    critical_section::with(|_| unsafe {
+        let systick = SysTickState::save();
+        chip::sleep_ram(plan, cycles);
+        systick.restore();
+    })
+}
+
+/// The SysTick registers, which sleep clears.
+struct SysTickState {
+    ctlr: u32,
+    cntl: u32,
+    #[cfg(systick_ch583)]
+    cnth: u32,
+    cmplr: u32,
+    #[cfg(systick_ch583)]
+    cmphr: u32,
+}
+
+impl SysTickState {
+    fn save() -> Self {
+        let r = pac::SYSTICK;
+        Self {
+            ctlr: r.stk_ctlr().read().0,
+            cntl: r.stk_cntl().read().0,
+            #[cfg(systick_ch583)]
+            cnth: r.stk_cnth().read().0,
+            cmplr: r.stk_cmplr().read().0,
+            #[cfg(systick_ch583)]
+            cmphr: r.stk_cmphr().read().0,
+        }
+    }
+
+    /// Put the count and compare values back with the counter stopped, then
+    /// restart it.
+    fn restore(&self) {
+        let r = pac::SYSTICK;
+        r.stk_ctlr().write_value(pac::systick::regs::StkCtlr(0));
+        r.stk_cntl().write_value(pac::systick::regs::StkCntl(self.cntl));
+        #[cfg(systick_ch583)]
+        r.stk_cnth().write_value(pac::systick::regs::StkCnth(self.cnth));
+        r.stk_cmplr().write_value(pac::systick::regs::StkCmplr(self.cmplr));
+        #[cfg(systick_ch583)]
+        r.stk_cmphr().write_value(pac::systick::regs::StkCmphr(self.cmphr));
+        r.stk_ctlr().write_value(pac::systick::regs::StkCtlr(self.ctlr));
+    }
 }
 
 /// Power down everything but the PMU, the RTC clock and what `config`
@@ -469,12 +514,14 @@ unsafe fn wait() {
     }
 }
 
-/// Busy-wait `ticks` SysTick counts (`cnt` is `STK_CNTL`).
+/// Busy-wait at least `cycles` HCLK cycles (an iteration takes more than
+/// one). Not SysTick: it does not count straight after a sleep.
 #[inline(always)]
-unsafe fn spin(cnt: *const u32, ticks: u32) {
-    unsafe {
-        let start = rd(cnt);
-        while rd(cnt).wrapping_sub(start) < ticks {}
+unsafe fn spin(cycles: u32) {
+    let mut n = cycles;
+    while n != 0 {
+        unsafe { core::arch::asm!("nop") };
+        n -= 1;
     }
 }
 
@@ -663,13 +710,13 @@ mod chip {
     /// [`sleep`](super::sleep), in RAM: WCH's `LowPower_Sleep`, wrapped as
     /// its PM example's `PM_LowPower_Sleep`: HCLK moves from the HSE to the
     /// HSI first (the same rate, from the PLL), and stays there for
-    /// `wake_ticks` after the wake-up, while the crystal restarts and the
+    /// `wake_cycles` after the wake-up, while the crystal restarts and the
     /// flash powers up. Not done: WCH's reset of the USBHS registers after a
     /// sleep with `RB_PWR_EXTEND`, which only matters to a USBHS driver (this
     /// HAL has none).
     #[inline(never)]
     #[unsafe(link_section = ".data.ch5xx_hal.pwr.sleep")]
-    pub(super) unsafe fn sleep_ram(keep: u16, wake_ticks: u32, cnt: *const u32) {
+    pub(super) unsafe fn sleep_ram(keep: u16, wake_cycles: u32) {
         unsafe {
             begin();
             let clk = rd(CLK_SYS_CFG);
@@ -701,7 +748,7 @@ mod chip {
                 wr(CLK_SYS_CFG, hsi_clk);
             }
             sam! { wr(POWER_PLAN, rd(POWER_PLAN) & !PWR_PLAN_EN); }
-            spin(cnt, wake_ticks);
+            spin(wake_cycles);
             sam! {
                 wr(CLK_SYS_CFG, clk);
                 wr(HFCK_PWR_CTRL, hfck);
@@ -798,7 +845,7 @@ mod chip {
     /// for the flash command's preamble only (it ends the continuous read).
     #[inline(never)]
     #[unsafe(link_section = ".data.ch5xx_hal.pwr.sleep")]
-    pub(super) unsafe fn sleep_ram(keep: u16, wake_ticks: u32, cnt: *const u32) {
+    pub(super) unsafe fn sleep_ram(keep: u16, wake_cycles: u32) {
         unsafe {
             begin();
             flash_park(false);
@@ -817,7 +864,7 @@ mod chip {
             wait();
             sam! { wr(POWER_PLAN, rd(POWER_PLAN) & !PWR_PLAN_EN); }
             sam! { wr(PLL_CONFIG, rd(PLL_CONFIG) & !PLL_SLEEP); }
-            spin(cnt, wake_ticks);
+            spin(wake_cycles);
             sam! {
                 wr(XT32M_TUNE, tune);
                 wr(BAT_DET_CTRL, bat);
