@@ -1,10 +1,13 @@
 //! Power management test: battery monitor, DC-DC (off unless `DCDC` is
 //! set), then idle, halt and sleep woken by the RTC alarm, sleep woken by
 //! the KEY button (PB22) or a 10 s timeout, and finally shutdown, which wakes
-//! as a reset after 1 s and reports from there. Results are reported over SDI
-//! print.
+//! as a reset after 1 s and reports from there.
 //!
-//! hw-test: manual. It enters the low-power modes, which may drop the debug
+//! Results go to SDI print and to UART1 TX on PA9 (115200 8N1): SDI print
+//! stops at the first halt, so read the UART (e.g. PA9 to WCH-LinkE RX, and
+//! a runner without `--enable-sdi-print`, which then forwards the UART).
+//!
+//! hw-test: manual. It enters the low-power modes, which drop the debug
 //! link, so `hw-test.sh` runs it only when named. The key sleep waits up to
 //! 10 s: allow `SECS=60`.
 
@@ -20,14 +23,40 @@ use embassy_time::{Instant, Timer};
 use hal::debug::SDIPrint;
 use hal::exti::ExtiInput;
 use hal::gpio::Pull;
+use hal::mode::Blocking;
+use hal::peripherals::UART1;
 use hal::pwr::{
     self, BatteryMonitor, LowPowerLevel, PreciseLevel, ResetReason, ShutdownConfig, SleepConfig, WakeConfig,
 };
 use hal::rtc::{Config, Rtc, TICKS_PER_SECOND};
+use hal::uart::{self, UartTx};
 use panic_halt as _;
 
 /// Set once the board is known to have the DC-DC inductor (VSW to VDCID).
 const DCDC: bool = false;
+
+/// The UART copy of the output.
+static mut TX: Option<UartTx<'static, UART1, Blocking>> = None;
+
+/// Print a line to SDI and to the UART.
+fn out(args: core::fmt::Arguments) {
+    hal::println!("{}", args);
+    if let Some(tx) = unsafe { &mut *(&raw mut TX) } {
+        let _ = core::fmt::Write::write_fmt(tx, args);
+        let _ = tx.blocking_write(b"\r\n");
+    }
+}
+
+macro_rules! log {
+    ($($t:tt)*) => { out(format_args!($($t)*)) };
+}
+
+/// Let the UART finish before a low-power mode stops its clock.
+fn flush() {
+    if let Some(tx) = unsafe { &mut *(&raw mut TX) } {
+        let _ = tx.blocking_flush();
+    }
+}
 
 struct Checks {
     pass: u32,
@@ -41,7 +70,7 @@ impl Checks {
         } else {
             self.fail += 1;
         }
-        hal::println!("{} {}", if ok { "PASS" } else { "FAIL" }, name);
+        log!("{} {}", if ok { "PASS" } else { "FAIL" }, name);
     }
 }
 
@@ -97,11 +126,13 @@ async fn main(_spawner: Spawner) -> ! {
         ..Default::default()
     });
     SDIPrint::enable();
+    let tx = UartTx::new_blocking::<0>(p.UART1, p.PA9, uart::Config::default()).unwrap();
+    unsafe { *(&raw mut TX) = Some(tx) };
     let mut c = Checks { pass: 0, fail: 0 };
     let mut rtc = Rtc::new(p.RTC, Config::default()).unwrap();
 
     let reason = pwr::reset_reason();
-    hal::println!("reset reason: {:?}", reason);
+    log!("reset reason: {:?}", reason);
     let k = kept();
     if unsafe { (*k).magic } == MAGIC {
         // Second boot: after the shutdown.
@@ -109,7 +140,7 @@ async fn main(_spawner: Spawner) -> ! {
         c.pass = unsafe { (*k).pass };
         c.fail = unsafe { (*k).fail };
         let slept = ms(rtc.now() - unsafe { (*k).at });
-        hal::println!("back from shutdown after {} ms", slept);
+        log!("back from shutdown after {} ms", slept);
         c.check(
             "shutdown wakes as a shutdown-wake reset",
             reason == ResetReason::ShutdownWake,
@@ -122,7 +153,7 @@ async fn main(_spawner: Spawner) -> ! {
     }
 
     let sysclk = hal::rcc::clocks().sysclk;
-    hal::println!(
+    log!(
         "sysclk {} Hz, DC-DC supported {}, enabled {}, POWER_PLAN {:#06x}",
         sysclk.0,
         pwr::dcdc_supported(),
@@ -134,18 +165,18 @@ async fn main(_spawner: Spawner) -> ! {
     pwr::set_battery_monitor(BatteryMonitor::Precise(PreciseLevel::V2_55));
     Timer::after_millis(1).await;
     let s = pwr::battery_status();
-    hal::println!("precise 2.55 V: {:?}", s);
+    log!("precise 2.55 V: {:?}", s);
     c.check("precise detector: 3.3 V is not low", !s.low && !s.lower);
     pwr::set_battery_monitor(BatteryMonitor::LowPower(LowPowerLevel::V2_4));
     Timer::after_millis(1).await;
     let s = pwr::battery_status();
-    hal::println!("low-power 2.4 V: {:?}", s);
+    log!("low-power 2.4 V: {:?}", s);
     c.check("low-power monitor: 3.3 V is not low", !s.low);
     pwr::set_battery_monitor(BatteryMonitor::Off);
 
     if DCDC {
         let r = pwr::enable_dcdc();
-        hal::println!("enable_dcdc: {:?}", r);
+        log!("enable_dcdc: {:?}", r);
         c.check("DC-DC enables", r.is_ok() && pwr::is_dcdc_enabled());
         // Measure the supply current now (WCH: about 60% of the LDO's).
         let t0 = Instant::now();
@@ -154,7 +185,7 @@ async fn main(_spawner: Spawner) -> ! {
         pwr::disable_dcdc();
         c.check("DC-DC disables", !pwr::is_dcdc_enabled());
     } else {
-        hal::println!("DC-DC skipped (set DCDC once the inductor is confirmed)");
+        log!("DC-DC skipped (set DCDC once the inductor is confirmed)");
     }
 
     let mut wake = WakeConfig::default();
@@ -167,12 +198,13 @@ async fn main(_spawner: Spawner) -> ! {
     alarm_in(&mut rtc, 100);
     let mut n = 0;
     while !rtc.is_alarm_pending() && n < 100 {
+        flush();
         pwr::idle();
         n += 1;
     }
     let e = t0.elapsed().as_millis();
     rtc.clear_alarm();
-    hal::println!("idle: {} waits, {} ms", n, e);
+    log!("idle: {} waits, {} ms", n, e);
     c.check(
         "idle ends on the RTC alarm after ~100 ms",
         (95..130).contains(&e) && n < 100,
@@ -181,11 +213,12 @@ async fn main(_spawner: Spawner) -> ! {
     // Halt: HCLK stops, so SysTick misses the wait; the RTC does not.
     let t0 = Instant::now();
     let r0 = alarm_in(&mut rtc, 200);
+    flush();
     pwr::halt();
     let (e, r) = (t0.elapsed().as_millis(), ms(rtc.now() - r0));
     let pending = rtc.is_alarm_pending();
     rtc.clear_alarm();
-    hal::println!("halt: RTC {} ms, SysTick {} ms, alarm {}", r, e, pending);
+    log!("halt: RTC {} ms, SysTick {} ms, alarm {}", r, e, pending);
     c.check(
         "halt ends on the RTC alarm after ~200 ms",
         pending && (190..260).contains(&r),
@@ -196,11 +229,12 @@ async fn main(_spawner: Spawner) -> ! {
     // Sleep, flash off.
     let t0 = Instant::now();
     let r0 = alarm_in(&mut rtc, 200);
+    flush();
     pwr::sleep(SleepConfig::default());
     let (e, r) = (t0.elapsed().as_millis(), ms(rtc.now() - r0));
     let pending = rtc.is_alarm_pending();
     rtc.clear_alarm();
-    hal::println!("sleep: RTC {} ms, SysTick {} ms, alarm {}", r, e, pending);
+    log!("sleep: RTC {} ms, SysTick {} ms, alarm {}", r, e, pending);
     c.check(
         "sleep ends on the RTC alarm after ~200 ms",
         pending && (190..260).contains(&r),
@@ -213,11 +247,12 @@ async fn main(_spawner: Spawner) -> ! {
     let r0 = alarm_in(&mut rtc, 100);
     let mut keep = SleepConfig::default();
     keep.flash = true;
+    flush();
     pwr::sleep(keep);
     let r = ms(rtc.now() - r0);
     let pending = rtc.is_alarm_pending();
     rtc.clear_alarm();
-    hal::println!("sleep (flash on): RTC {} ms, alarm {}", r, pending);
+    log!("sleep (flash on): RTC {} ms, alarm {}", r, pending);
     c.check(
         "sleep with flash on ends after ~100 ms",
         pending && (90..160).contains(&r),
@@ -227,12 +262,13 @@ async fn main(_spawner: Spawner) -> ! {
     let mut key = ExtiInput::new(p.PB22, Pull::Up);
     wake.gpio = true;
     pwr::configure_wake(wake);
-    hal::println!("press KEY within 10 s to wake the sleep (or wait)");
+    log!("press KEY within 10 s to wake the sleep (or wait)");
     Timer::after_millis(10).await;
     let r0 = alarm_in(&mut rtc, 10_000);
     // `select` polls the edge wait first, which arms the pin, then sleeps.
     // The sleep always finishes first: the pin interrupt that woke it runs
     // as it returns.
+    flush();
     let r = select(key.wait_for_falling_edge(), async {
         pwr::sleep(SleepConfig::default())
     })
@@ -241,7 +277,7 @@ async fn main(_spawner: Spawner) -> ! {
     let by_rtc = rtc.is_alarm_pending();
     rtc.clear_alarm();
     rtc.disable_alarm();
-    hal::println!(
+    log!(
         "key sleep: {} ms, woken by {}",
         slept,
         if by_rtc { "RTC (no key press)" } else { "KEY" }
@@ -263,7 +299,7 @@ async fn main(_spawner: Spawner) -> ! {
     pwr::configure_wake(wake);
 
     // Shutdown: wakes as a reset, reported by the next boot.
-    hal::println!("shutdown for 1 s");
+    log!("shutdown for 1 s");
     Timer::after_millis(10).await;
     let at = alarm_in(&mut rtc, 1000);
     unsafe {
@@ -276,11 +312,12 @@ async fn main(_spawner: Spawner) -> ! {
     };
     let mut sd = ShutdownConfig::default();
     sd.main_ram = true;
+    flush();
     pwr::shutdown(sd)
 }
 
 async fn finish(c: &Checks) -> ! {
-    hal::println!("PWR: {} passed, {} failed", c.pass, c.fail);
+    log!("PWR: {} passed, {} failed", c.pass, c.fail);
     loop {
         Timer::after_secs(1).await;
     }
