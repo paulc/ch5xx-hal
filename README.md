@@ -3,8 +3,8 @@
 Rust HAL (Hardware Abstraction Layer) crate for WCH's CH5xx BLE microcontrollers.
 
 > **Note**
-> This project is under development. Most peripheral drivers exist for CH592
-> only; CH585 has the core (GPIO, delay, clocks). Expect the API to change.
+> This project is under development. The peripheral drivers below exist for
+> CH592 and CH584/CH585. Expect the API to change.
 
 This HAL follows the [ch32-hal](https://github.com/ch32-rs/ch32-hal) layout and
 the metapac approach: register access comes from a single
@@ -15,16 +15,23 @@ code serves every supported chip in the family.
 
 | Chip  | Core      | Status                          |
 | ----- | --------- | ------------------------------- |
-| CH585 | QingKe V3C | Bring-up target; blinky verified on hardware |
+| CH584 | QingKe V3C | Peripheral drivers below, tested on a WeAct CH584F board |
+| CH585 | QingKe V3C | As CH584 (CH585 adds USBHS and SPI1, not covered); not tested on a CH585 part |
 | CH592 | QingKe V4C | Peripheral drivers below, tested on a WeAct CH592F board |
 
-Chip support is selected with a Cargo feature (`ch585`, `ch592`). Exactly one
-must be enabled. The chip feature also selects the QingKe core for `qingke` /
-`qingke-rt`. Pin singletons only exist for bonded pins; on CH592 that is the
-QFN32 (CH592X) set, PA4-PA15, PB0, PB4, PB6, PB7, PB10-PB15, PB22 and PB23.
-The QFN28 CH592F lacks PA6, PA7, PB0 and PB6, which still get singletons.
+Chip support is selected with a Cargo feature (`ch584`, `ch585`, `ch592`).
+Exactly one must be enabled. The chip feature also selects the QingKe core
+for `qingke` / `qingke-rt`. Pin singletons only exist for bonded pins:
+
+- CH592: the QFN32 (CH592X) set, PA4-PA15, PB0, PB4, PB6, PB7, PB10-PB15,
+  PB22 and PB23. The QFN28 CH592F lacks PA6, PA7, PB0 and PB6, which still
+  get singletons.
+- CH584/CH585: the QFN48 (CH58xM) set, PA0-PA15 and PB0-PB23. The QFN32
+  CH584F/CH585F bonds only PA4, PA5, PA9-PA15, PB4-PB8, PB10-PB17, PB22 and
+  PB23.
+
 PB23 is also the RST# input; with `CFG_RESET_EN` set in the user config (as on
-the WeAct board) it reads high whatever drives it.
+the WeAct boards) it reads high whatever drives it.
 
 ## Building
 
@@ -40,8 +47,12 @@ Builds need nightly with `rust-src` (`-Zbuild-std=core`); the example crates
 set this up in `.cargo/config.toml`:
 
 ```console
-cargo +nightly build -Zbuild-std=core --target riscv32imac-unknown-none-elf --release --features ch592
+cargo +nightly build -Zbuild-std=core --target riscv32imc-unknown-none-elf --release --features ch592
+cargo +nightly build -Zbuild-std=core --target riscv32imc-unknown-none-elf --release --features ch584
 ```
+
+Build for `riscv32imc`: the CH584/CH585 core (V3C) has no A extension, and on
+CH592 an LR/SC loop is not safe against interrupts (see the examples below).
 
 ### API docs
 
@@ -50,11 +61,11 @@ Both builds write to the same directory, so give the second one its own
 `--target-dir` to keep both:
 
 ```console
-# CH592: target/riscv32imac-unknown-none-elf/doc/ch5xx_hal/index.html
-cargo +nightly doc -Zbuild-std=core --target riscv32imac-unknown-none-elf --features ch592,embassy,exti --no-deps
+# CH592: target/riscv32imc-unknown-none-elf/doc/ch5xx_hal/index.html
+cargo +nightly doc -Zbuild-std=core --target riscv32imc-unknown-none-elf --features ch592,embassy,exti --no-deps
 
-# CH585: target/doc-ch585/riscv32imac-unknown-none-elf/doc/ch5xx_hal/index.html
-cargo +nightly doc -Zbuild-std=core --target riscv32imac-unknown-none-elf --features ch585 --no-deps --target-dir target/doc-ch585
+# CH584: target/doc-ch584/riscv32imc-unknown-none-elf/doc/ch5xx_hal/index.html
+cargo +nightly doc -Zbuild-std=core --target riscv32imc-unknown-none-elf --features ch584,embassy,exti --no-deps --target-dir target/doc-ch584
 ```
 
 Add `--open` to open the result in a browser, or serve the `doc` directory
@@ -69,28 +80,30 @@ All chips:
 - `delay`: `embedded-hal` `DelayNs`, backed by the core SysTick
 - `rcc`: system clock: HSE, HSI (CH584/CH585) or PLL
 
-CH592 only. The APIs follow ch32-hal where one exists. "HW" marks what has
-been checked on a WeAct CH592F board by the test examples in `examples/ch592`.
+CH592 and CH584/CH585. The APIs follow ch32-hal where one exists. The HW
+columns mark what has been checked on a WeAct CH592F and a WeAct CH584F
+board by the test examples in `examples/ch592` and `examples/ch584`.
 
-| Module | Driver | HW |
-| ------ | ------ | -- |
-| `debug` | SDI print (`println!` over the debug link; `sdi_writeln!` for raw bytes) | yes |
-| `embassy` | `embassy-time` driver on SysTick (feature `embassy`) | yes |
-| `exti` | `ExtiInput` pin interrupts, async edge/level waits (feature `exti`) | yes |
-| `uart` | UART0-3, blocking and async, `embedded-io(-async)` | yes |
-| `spi` | SPI0 master, blocking and async, `embedded-hal(-async)` | yes (alternate pins PB12-PB15 untested) |
-| `adc` | single-ended and differential, PGA, calibration, temperature, VBAT; async (interrupt) reads, DMA reads (back to back or timed), ring-buffered DMA | yes |
-| `timer::simple_pwm` | `SimplePwm` on TMR0-3 | yes (TMR1/TMR2 remap pins untested) |
-| `timer::input_capture` | `InputCapture` on TMR0-3: period or high/low times, blocking and async; DMA on TMR1/TMR2 | yes |
-| `timer::counter` | `Counter` on TMR0-3: edge counting with a wrap period, blocking and async | yes |
-| `timer::pwmx` | 8/16-bit PWMX channels 4-11 | yes |
-| `rtc` | counter, alarm, periodic flag, LSI or LSE, LSI calibration | yes |
-| `wdg` | `IndependentWatchdog` (IWDG) | yes |
-| `i2c` | I2C0 master, blocking and async, `embedded-hal(-async)`; on PB15/PB14, so it turns the debug interface off | yes (bus scan) |
-| `soft_i2c` | bit-bang I2C master on any two pins, clocked by TMR0-3, blocking and async, `embedded-hal(-async)`; up to 100 kHz with feature `highcode` | yes (waveform, stretching, errors; devices not yet) |
-| `usb` | full-speed device for `embassy-usb` | yes (CDC-ACM echo; stall and remote wakeup untested) |
+| Module | Driver | HW CH592 | HW CH584 |
+| ------ | ------ | -------- | -------- |
+| `debug` | SDI print (`println!` over the debug link; `sdi_writeln!` for raw bytes) | yes | yes |
+| `embassy` | `embassy-time` driver on SysTick (feature `embassy`) | yes | yes |
+| `exti` | `ExtiInput` pin interrupts, async edge/level waits (feature `exti`) | yes | yes |
+| `uart` | UART0-3, blocking and async, `embedded-io(-async)` | yes | yes |
+| `spi` | SPI0 master, blocking and async, `embedded-hal(-async)` | yes (alternate pins PB12-PB15 untested) | yes (alternate pins untested) |
+| `adc` | single-ended and differential, PGA, calibration, temperature, VBAT; async (interrupt) reads, DMA reads (back to back or timed), ring-buffered DMA | yes | yes |
+| `timer::simple_pwm` | `SimplePwm` on TMR0-3 | yes (TMR1/TMR2 remap pins untested) | yes (TMR1/TMR2 remap pins untested) |
+| `timer::input_capture` | `InputCapture` on TMR0-3: period or high/low times, blocking and async; DMA on TMR1/TMR2 (all four on CH584/CH585) | yes | yes (DMA on TMR0/TMR3 untested) |
+| `timer::counter` | `Counter` on TMR0-3: edge counting with a wrap period, blocking and async | yes | yes |
+| `timer::pwmx` | 8/16-bit PWMX channels 4-11 | yes | yes (remap pins untested) |
+| `rtc` | counter, alarm, periodic flag, LSI or LSE, LSI calibration | yes | yes |
+| `wdg` | `IndependentWatchdog` (IWDG) | yes | yes |
+| `i2c` | I2C0 master, blocking and async, `embedded-hal(-async)`; on CH592 on PB15/PB14, so it turns the debug interface off | yes (bus scan) | yes (no device: NACKs, stuck-line errors and recovery) |
+| `soft_i2c` | bit-bang I2C master on any two pins, clocked by TMR0-3, blocking and async, `embedded-hal(-async)`; up to 100 kHz with feature `highcode` | yes (waveform, stretching, errors; devices not yet) | yes (as CH592) |
+| `usb` | full-speed device for `embassy-usb` (`USBFS` on CH584/CH585) | yes (CDC-ACM echo; stall and remote wakeup untested) | enumerates (echo untested) |
 
-Not implemented: BLE, low-power modes, timer PWM DMA, CH585 peripherals.
+Not implemented: BLE, low-power modes, timer PWM DMA, and on CH584/CH585
+USBHS, SPI1, LCD, LED and touch-key.
 
 ## What differs from CH32
 
@@ -116,6 +129,15 @@ The CH5xx register model is not a CH32 one, so a few things look different:
   sets `CLK_CFG` to `0x014D` (24 MHz) on the running program.
 
 ## Examples
+
+`examples/ch584` targets the WeAct CH584F core board (LED on PB6) and holds
+the same hardware tests as `examples/ch592`, plus `i2c`; build them for
+`riscv32imc` (the default there), since V3C has no A extension and the
+first atomic instruction of an `imac` build traps. The runner is
+`wlink --chip CH585 flash`: wlink reports a CH584 as a CH585. They need the
+PA14-PA15 jumper too. On that board PB10/PB11 go to the USB connector (with
+a host attached they read low through the pull-ups, so `soft_i2c` uses
+PA10/PA11 there) and PB22 has a strong pull-up.
 
 `examples/ch585` blinks LED0 (PB16) and LED1 (PB17) in opposite phase. Its
 runner is `probe-rs run --chip CH585`, which flashes, resets and streams
@@ -176,6 +198,7 @@ CH592 should use `riscv32imc` too.
 The examples enable the HAL's `highcode` feature, which runs interrupt entry
 and the functions placed in `.highcode` from RAM: CH592 flash runs code
 roughly ten times slower than RAM (an empty loop iteration takes 32 cycles).
+It works the same on CH584 (V3C).
 
 ### PB14/PB15
 
@@ -194,10 +217,12 @@ before calling it (as `i2c_scan` does) so the debugger can still attach.
 
 ## Console output
 
-CH585 has no SDI printf (the debug-module `DATA0`/`DATA1` handshake is not
-present). CH592 has it, but wlink needs a one-line patch to use it; see
-`examples/ch592/src/bin/sdi_print.rs`. Otherwise use `defmt` over SEGGER RTT,
-which needs no special chip support and which `probe-rs` handles natively:
+CH592 and CH584/CH585 both have SDI print (the debug-module `DATA0`/`DATA1`
+handshake, at `0xE000_0380` on V4C and `0xE000_0340` on V3C), but wlink
+0.1.3 refuses to arm it for either: add `CH59X` and `CH585` to
+`support_sdi_print()` in wlink's `src/lib.rs`. See `src/debug.rs`. Otherwise
+use `defmt` over SEGGER RTT, which needs no special chip support and which
+`probe-rs` handles natively:
 
 ```console
 cd examples/ch585

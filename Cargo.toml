@@ -41,7 +41,7 @@ embassy-time-driver = { version = "0.2.2", optional = true }
 embassy-time-queue-utils = { version = "0.3.2", optional = true }
 
 embassy-hal-internal = "0.5.0"
-# USB device driver (CH592).
+# USB device driver (CH592, CH584/CH585).
 embassy-usb-driver = { version = "0.2.2", optional = true }
 
 critical-section = "1.2.0"
@@ -60,14 +60,14 @@ ch5xx-metapac = { path = "../ch5xx-data/build/ch5xx-metapac", default-features =
 [features]
 default = ["rt"]
 rt = ["dep:qingke-rt"]
-## embassy-time driver on the core SysTick (CH592 only so far).
+## embassy-time driver on the core SysTick.
 embassy = ["rt", "dep:embassy-time-driver", "dep:embassy-time-queue-utils"]
-## Built-in GPIO_A/GPIO_B interrupt handlers for `exti::ExtiInput` (CH592).
+## Built-in GPIO_A/GPIO_B interrupt handlers for `exti::ExtiInput`.
 ## Disable to provide your own.
 exti = ["rt"]
 ## Run interrupt entry, the vector table and `.highcode` functions from RAM
 ## (`qingke-rt`'s `highcode`), as ch32-hal does. Code runs several times
-## faster from RAM than from CH592 flash; `soft_i2c` needs it for 100 kHz.
+## faster from RAM than from flash; `soft_i2c` needs it for 100 kHz.
 highcode = ["rt", "qingke-rt?/highcode"]
 
 # Chip-selection features. Exactly one must be enabled; `ch5xx-metapac` panics
