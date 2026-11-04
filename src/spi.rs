@@ -6,8 +6,11 @@
 //!   reads, with `TOTAL_CNT` bytes clocked automatically. Full-duplex
 //!   transfers go byte by byte through `BUFFER`, which latches MISO whichever
 //!   way the FIFO points (checked on CH592).
-//! - The DMA is built in, but its address registers are 16 bits: it reaches
-//!   RAM only. Async writes from flash go through a small RAM bounce buffer.
+//! - The DMA is built in, but its address registers are 16 bits (17 on
+//!   CH584/CH585): it reaches RAM only. Async writes from flash go through a
+//!   small RAM bounce buffer.
+//! - `TOTAL_CNT` holds 16 bits on CH592 and 12 on CH584/CH585, so longer
+//!   transfers run in chunks.
 //! - Only SPI modes 0 and 3 exist (`MST_SCK_MOD`), and only 8-bit words.
 //! - SCK = HCLK / `CLOCK_DIV`, `CLOCK_DIV` >= 2.
 //!
@@ -16,7 +19,7 @@
 //! the embedded-hal (async) `SpiBus` traits. Chip select is left to the user,
 //! as in ch32-hal.
 //!
-//! # Pins (CH592)
+//! # Pins (CH592, CH584/CH585)
 //!
 //! | REMAP | SCK  | MOSI | MISO |
 //! |-------|------|------|------|
@@ -24,7 +27,8 @@
 //! | 1     | PB13 | PB14 | PB15 |
 //!
 //! REMAP 1 puts MOSI/MISO on PB14/PB15, the debug link's TIO/TCK: using it
-//! takes the debugger off the chip.
+//! takes the debugger off the chip. CH585 has a second, master-only SPI1
+//! without DMA, which this driver does not cover; CH584 lacks it.
 
 use core::future::poll_fn;
 use core::marker::PhantomData;
@@ -178,7 +182,7 @@ impl<'d, T: Instance, M: PeriMode> Spi<'d, T, M> {
     /// Blocking write; received bits are discarded.
     pub fn blocking_write(&mut self, words: &[u8]) -> Result<(), Error> {
         let r = T::regs();
-        for chunk in words.chunks(u16::MAX as usize) {
+        for chunk in words.chunks(MAX_CNT) {
             r.ctrl_mod().modify(|w| w.set_fifo_dir(false));
             r.total_cnt().write(|w| w.set_total_cnt(chunk.len() as u16));
             r.int_flag().write(|w| w.set_if_cnt_end(true));
@@ -196,7 +200,7 @@ impl<'d, T: Instance, M: PeriMode> Spi<'d, T, M> {
     /// Blocking read. What MOSI sends meanwhile is up to the hardware.
     pub fn blocking_read(&mut self, words: &mut [u8]) -> Result<(), Error> {
         let r = T::regs();
-        for chunk in words.chunks_mut(u16::MAX as usize) {
+        for chunk in words.chunks_mut(MAX_CNT) {
             r.ctrl_mod().modify(|w| w.set_fifo_dir(true));
             r.total_cnt().write(|w| w.set_total_cnt(chunk.len() as u16));
             r.int_flag().write(|w| w.set_if_cnt_end(true));
@@ -361,7 +365,7 @@ impl<'d, T: Instance> Spi<'d, T, Async> {
     /// DMA write. `data` outside RAM is sent through a bounce buffer.
     pub async fn write(&mut self, data: &[u8]) -> Result<(), Error> {
         if in_dma_ram(data.as_ptr(), data.len()) {
-            for chunk in data.chunks(u16::MAX as usize) {
+            for chunk in data.chunks(MAX_CNT) {
                 dma::<T>(chunk.as_ptr() as u32, chunk.len(), false).await;
             }
         } else {
@@ -377,7 +381,7 @@ impl<'d, T: Instance> Spi<'d, T, Async> {
     /// DMA read. What MOSI sends meanwhile is up to the hardware.
     pub async fn read(&mut self, data: &mut [u8]) -> Result<(), Error> {
         // `&mut` data is always in RAM.
-        for chunk in data.chunks_mut(u16::MAX as usize) {
+        for chunk in data.chunks_mut(MAX_CNT) {
             dma::<T>(chunk.as_mut_ptr() as u32, chunk.len(), true).await;
         }
         T::regs().ctrl_mod().modify(|w| w.set_fifo_dir(false));
@@ -396,11 +400,24 @@ impl<'d, T: Instance> Spi<'d, T, Async> {
     }
 }
 
-/// Can the SPI DMA reach `[ptr, ptr + len)`? Its address registers are 16
-/// bits, offsets into the RAM at 0x2000_0000.
+/// Bytes one `TOTAL_CNT` run moves.
+#[cfg(spi_ch592)]
+const MAX_CNT: usize = u16::MAX as usize;
+/// Bytes one `TOTAL_CNT` run moves: WCH's driver allows up to 4095.
+#[cfg(spi_ch585)]
+const MAX_CNT: usize = 0xfff;
+
+/// The addresses the DMA reaches: its address registers are 16 bits on
+/// CH592, 17 on CH584/CH585, offsets into the RAM at 0x2000_0000.
+#[cfg(spi_ch592)]
+const DMA_WINDOW: core::ops::Range<usize> = 0x2000_0000..0x2001_0000;
+#[cfg(spi_ch585)]
+const DMA_WINDOW: core::ops::Range<usize> = 0x2000_0000..0x2002_0000;
+
+/// Can the SPI DMA reach `[ptr, ptr + len)`?
 fn in_dma_ram(ptr: *const u8, len: usize) -> bool {
     let start = ptr as usize;
-    start >= 0x2000_0000 && start + len <= 0x2001_0000
+    start >= DMA_WINDOW.start && start + len <= DMA_WINDOW.end
 }
 
 /// Run one DMA transfer of `len` bytes at RAM address `addr`, `rx` = into RAM.
@@ -410,8 +427,8 @@ async fn dma<T: Instance>(addr: u32, len: usize, rx: bool) {
 
     r.ctrl_cfg().modify(|w| w.set_dma_enable(false));
     r.ctrl_mod().modify(|w| w.set_fifo_dir(rx));
-    r.dma_beg().write(|w| w.set_dma_beg(addr as u16));
-    r.dma_end().write(|w| w.set_dma_end((addr as usize + len) as u16));
+    r.dma_beg().write(|w| w.set_dma_beg(addr as _));
+    r.dma_end().write(|w| w.set_dma_end((addr as usize + len) as _));
     // Count first: `IF_CNT_END` is set again at once while the count is 0.
     r.total_cnt().write(|w| w.set_total_cnt(len as u16));
     r.int_flag().write(|w| {
@@ -561,8 +578,8 @@ pin_trait!(SckPin, Instance);
 pin_trait!(MosiPin, Instance);
 pin_trait!(MisoPin, Instance);
 
-#[cfg(ch592)]
-mod ch592 {
+/// SPI0: the same pins and remap on CH592 and CH584/CH585.
+mod spi0 {
     use super::*;
     use crate::sys::{set_clock_enabled, set_remap, ClockGate, RemapGroup};
 

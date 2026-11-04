@@ -119,7 +119,7 @@ pub mod i2c;
 pub mod rtc;
 #[cfg(any(tmr_ch592, tmr_ch585))]
 pub mod soft_i2c;
-#[cfg(ch592)]
+#[cfg(any(spi_ch592, spi_ch585))]
 pub mod spi;
 #[cfg(any(tmr_ch592, tmr_ch585))]
 pub mod timer;
