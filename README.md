@@ -67,7 +67,7 @@ All chips:
 - `init()`: clock/frequency setup and GPIO bring-up
 - `gpio`: input, output, flex pins, internal pull up/down, drive strength
 - `delay`: `embedded-hal` `DelayNs`, backed by the core SysTick
-- `rcc`: system clock (CH592: HSE/PLL selection; CH585: measured)
+- `rcc`: system clock: HSE, HSI (CH584/CH585) or PLL
 
 CH592 only. The APIs follow ch32-hal where one exists. "HW" marks what has
 been checked on a WeAct CH592F board by the test examples in `examples/ch592`.
@@ -109,11 +109,11 @@ The CH5xx register model is not a CH32 one, so a few things look different:
   frequency is computed exactly from `CLK_CFG`. The boot ROM leaves HSE / 5 =
   6.4 MHz; `rcc::Config` presets select up to 60 MHz from the PLL (USB needs
   the PLL, e.g. `SYSCLK_FREQ_60MHZ`).
-- **CH585**: the boot ROM leaves `CLK_CFG` PLL-sourced (`0x014D` rather than
-  the documented default; about 5.33 MHz on the bring-up part). Rather than
-  model the PLL, init measures SysTick against the RTC's independent 32 kHz
-  counter (the same idea as WCH's `OSC_CAL`) and reports the result through
-  `rcc::clocks()`. PLL setup is not implemented.
+- **CH584/CH585**: HCLK comes from the 32 MHz crystal, the 16 MHz RC (+-1%)
+  or the 312 MHz PLL, each divided, and again the frequency is computed from
+  `CLK_CFG`. The boot ROM leaves HSI / 3 = 5.33 MHz; presets select up to
+  78 MHz from the PLL (`SYSCLK_FREQ_62_4MHZ` is WCH's default). A wlink attach
+  sets `CLK_CFG` to `0x014D` (24 MHz) on the running program.
 
 ## Examples
 
