@@ -120,6 +120,8 @@ pub mod i2c;
 #[cfg(led_ch585)]
 pub mod ledc;
 #[cfg(any(sys_ch592, sys_ch585))]
+pub mod pwr;
+#[cfg(any(sys_ch592, sys_ch585))]
 pub mod rtc;
 #[cfg(any(tmr_ch592, tmr_ch585))]
 pub mod soft_i2c;
