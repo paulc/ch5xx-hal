@@ -52,8 +52,12 @@
 //! |------|------|------|------|------|------|------|------|------|
 //! | PA4  | PA0  | PA1  | PA2  | PA3  | PA5  | PA6  | PA7  | PA8  |
 //!
-//! There is no remap. Lanes left without a pin still shift, unseen; the QFN32
-//! CH584F/CH585F bonds only LED4 of the data lines.
+//! There is no remap. Lanes left without a pin still shift, unseen.
+//!
+//! WCH lists the LED screen interface for the QFN48 parts (CH58xM/X) only.
+//! The QFN32 CH584F/CH585F have the same block but bond only LEDC and LED4,
+//! so one lane, in 8-lane mode; that works on a CH584F (`examples/ch584`'s
+//! `ledc` test), but WCH does not support it.
 
 use core::future::poll_fn;
 use core::marker::PhantomData;
