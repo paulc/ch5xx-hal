@@ -316,7 +316,7 @@ pub fn sleep(config: SleepConfig) {
     if config.usb_ble {
         plan |= PWR_EXTEND;
     }
-    let us = if config.flash { 0 } else { chip::FLASH_WAKE_US };
+    let us = chip::wake_us(config.flash);
     let ticks = (crate::delay::ticks_per_sec() as u64 * us as u64 / 1_000_000) as u32;
     let cnt = pac::SYSTICK.stk_cntl().as_ptr() as *const u32;
     critical_section::with(|_| unsafe { chip::sleep_ram(plan, ticks, cnt) })
@@ -542,7 +542,22 @@ mod chip {
 
     /// The flash needs 300 us after a sleep before code runs from it
     /// (`LowPower_Sleep`).
-    pub(super) const FLASH_WAKE_US: u32 = 300;
+    const FLASH_WAKE_US: u32 = 300;
+    /// The crystal needs about 1.6 ms after a sleep, which WCH's PM example
+    /// waits out on the HSI (as `PM_LowPower_Sleep`).
+    const HSE_WAKE_US: u32 = 1600;
+
+    /// How long [`sleep_ram`] runs on the HSI after the wake-up, in
+    /// microseconds of the clock in use now.
+    pub(super) fn wake_us(flash_kept: bool) -> u32 {
+        if unsafe { rd(CLK_SYS_CFG) } & RB_OSC32M_SEL != 0 {
+            HSE_WAKE_US
+        } else if flash_kept {
+            0
+        } else {
+            FLASH_WAKE_US
+        }
+    }
 
     const HFCK_PWR_CTRL: *mut u8 = 0x4000_100a as *mut u8;
     const SAFE_MODE_CTRL: *mut u8 = 0x4000_1010 as *mut u8;
@@ -645,13 +660,16 @@ mod chip {
         }
     }
 
-    /// [`sleep`](super::sleep), in RAM: WCH's `LowPower_Sleep`, then the wait
-    /// for the flash it leaves to the caller. Not done: WCH's reset of the
-    /// USBHS registers after a sleep with `RB_PWR_EXTEND`, which only matters
-    /// to a USBHS driver (this HAL has none).
+    /// [`sleep`](super::sleep), in RAM: WCH's `LowPower_Sleep`, wrapped as
+    /// its PM example's `PM_LowPower_Sleep`: HCLK moves from the HSE to the
+    /// HSI first (the same rate, from the PLL), and stays there for
+    /// `wake_ticks` after the wake-up, while the crystal restarts and the
+    /// flash powers up. Not done: WCH's reset of the USBHS registers after a
+    /// sleep with `RB_PWR_EXTEND`, which only matters to a USBHS driver (this
+    /// HAL has none).
     #[inline(never)]
     #[unsafe(link_section = ".data.ch5xx_hal.pwr.sleep")]
-    pub(super) unsafe fn sleep_ram(keep: u16, flash_ticks: u32, cnt: *const u32) {
+    pub(super) unsafe fn sleep_ram(keep: u16, wake_ticks: u32, cnt: *const u32) {
         unsafe {
             begin();
             let clk = rd(CLK_SYS_CFG);
@@ -660,30 +678,36 @@ mod chip {
             let sck = rd(FLASH_SCK);
             let tune = rd(XT32M_TUNE);
             let bat = rd(BAT_DET_CTRL);
+            // The crystal stops in sleep and is not ready when the core
+            // wakes, so run from the HSI around it.
+            let hsi_clk = clk & !RB_OSC32M_SEL;
+            sam! {
+                wr(HFCK_PWR_CTRL, hfck | RB_CLK_RC16M_PON);
+                wr(CLK_SYS_CFG, hsi_clk);
+            }
             sam! {
                 wr(BAT_DET_CTRL, bat_det_while_waiting(bat));
                 wr(XT32M_TUNE, (tune & 0xfc) | 0x03);
             }
             deep_sleep(true);
             let plan = (rd(POWER_PLAN) & (PWR_DCDC_EN | PWR_DCDC_PRE)) | PWR_PLAN_EN | PWR_CORE | PWR_MUST | keep;
-            sam! {
-                wr(POWER_PLAN, plan);
-                // Sleep needs HSI.
-                wr(HFCK_PWR_CTRL, rd(HFCK_PWR_CTRL) | RB_CLK_RC16M_PON);
-            }
-            slow_clock(clk, sck);
+            sam! { wr(POWER_PLAN, plan); }
+            slow_clock(hsi_clk, sck);
             wait();
-            settle(clk);
+            settle(hsi_clk);
             sam! {
                 wr(FLASH_CFG, cfg);
                 wr(FLASH_SCK, sck);
+                wr(CLK_SYS_CFG, hsi_clk);
+            }
+            sam! { wr(POWER_PLAN, rd(POWER_PLAN) & !PWR_PLAN_EN); }
+            spin(cnt, wake_ticks);
+            sam! {
                 wr(CLK_SYS_CFG, clk);
                 wr(HFCK_PWR_CTRL, hfck);
                 wr(XT32M_TUNE, tune);
                 wr(BAT_DET_CTRL, bat);
             }
-            sam! { wr(POWER_PLAN, rd(POWER_PLAN) & !PWR_PLAN_EN); }
-            spin(cnt, flash_ticks);
             end();
         }
     }
@@ -721,7 +745,12 @@ mod chip {
     use super::*;
 
     /// WCH's `LowPower_Sleep` waits 20 us after restoring the PLL.
-    pub(super) const FLASH_WAKE_US: u32 = 20;
+    const PLL_WAKE_US: u32 = 20;
+
+    /// How long [`sleep_ram`] waits after the wake-up, in microseconds.
+    pub(super) fn wake_us(_flash_kept: bool) -> u32 {
+        PLL_WAKE_US
+    }
 
     const PLL_CONFIG: *mut u8 = 0x4000_104b as *mut u8;
     /// `R8_PLL_CONFIG` bit 5, which WCH sets around halt and sleep
@@ -769,7 +798,7 @@ mod chip {
     /// for the flash command's preamble only (it ends the continuous read).
     #[inline(never)]
     #[unsafe(link_section = ".data.ch5xx_hal.pwr.sleep")]
-    pub(super) unsafe fn sleep_ram(keep: u16, flash_ticks: u32, cnt: *const u32) {
+    pub(super) unsafe fn sleep_ram(keep: u16, wake_ticks: u32, cnt: *const u32) {
         unsafe {
             begin();
             flash_park(false);
@@ -788,7 +817,7 @@ mod chip {
             wait();
             sam! { wr(POWER_PLAN, rd(POWER_PLAN) & !PWR_PLAN_EN); }
             sam! { wr(PLL_CONFIG, rd(PLL_CONFIG) & !PLL_SLEEP); }
-            spin(cnt, flash_ticks);
+            spin(cnt, wake_ticks);
             sam! {
                 wr(XT32M_TUNE, tune);
                 wr(BAT_DET_CTRL, bat);
