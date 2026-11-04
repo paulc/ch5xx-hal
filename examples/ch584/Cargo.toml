@@ -13,6 +13,7 @@ nb = "1.1.0"
 
 embassy-executor = { version = "0.10.0", features = ["executor-thread"] }
 embassy-futures = "0.1.2"
+embassy-sync = "0.8.0"
 embassy-time = "0.5.1"
 embassy-usb = { version = "0.5.1", default-features = false }
 
@@ -32,6 +33,10 @@ ble = ["ch5xx-hal/ble"]
 
 [[bin]]
 name = "ble_adv"
+required-features = ["ble"]
+
+[[bin]]
+name = "ble_peripheral"
 required-features = ["ble"]
 
 [profile.release]
