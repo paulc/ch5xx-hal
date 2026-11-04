@@ -514,11 +514,19 @@ unsafe fn wait() {
     }
 }
 
-/// Busy-wait at least `cycles` HCLK cycles (an iteration takes more than
-/// one). Not SysTick: it does not count straight after a sleep.
+/// HCLK cycles per [`spin`] iteration, run from RAM: 4 on a CH584
+/// (measured against SysTick). Not measured on CH592: 1 there, so the wait
+/// is at least as long as asked.
+#[cfg(sys_ch585)]
+const SPIN_CYCLES: u32 = 4;
+#[cfg(sys_ch592)]
+const SPIN_CYCLES: u32 = 1;
+
+/// Busy-wait about `cycles` HCLK cycles (at least that many on CH592).
+/// Not SysTick: it does not count straight after a sleep.
 #[inline(always)]
 unsafe fn spin(cycles: u32) {
-    let mut n = cycles;
+    let mut n = cycles / SPIN_CYCLES;
     while n != 0 {
         unsafe { core::arch::asm!("nop") };
         n -= 1;
