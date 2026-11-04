@@ -3,9 +3,10 @@
 //! the KEY button (PB22) or a 10 s timeout, and finally shutdown, which wakes
 //! as a reset after 1 s and reports from there.
 //!
-//! Results go to SDI print and to UART0 TX on PB7 (115200 8N1): SDI print
-//! stops at the first halt, so read the UART (e.g. PB7 to WCH-LinkE RX, and
-//! a runner without `--enable-sdi-print`, which then forwards the UART).
+//! Results go to UART0 TX on PB7 (115200 8N1), not SDI print, which stops at
+//! the first halt: wire PB7 to WCH-LinkE RX and use a runner without
+//! `--enable-sdi-print`, which then forwards the UART. The first boot waits
+//! 2 s before printing, to give a serial monitor time to attach.
 //!
 //! hw-test: manual. It enters the low-power modes, which drop the debug
 //! link, so `hw-test.sh` runs it only when named. The key sleep waits up to
@@ -20,7 +21,6 @@ use ch5xx_hal as hal;
 use embassy_executor::Spawner;
 use embassy_futures::select::{select, Either};
 use embassy_time::{Instant, Timer};
-use hal::debug::SDIPrint;
 use hal::exti::ExtiInput;
 use hal::gpio::Pull;
 use hal::mode::Blocking;
@@ -35,12 +35,11 @@ use panic_halt as _;
 /// Set once the board is known to have the DC-DC inductor (VSW to VDCID).
 const DCDC: bool = false;
 
-/// The UART copy of the output.
+/// The output.
 static mut TX: Option<UartTx<'static, UART0, Blocking>> = None;
 
-/// Print a line to SDI and to the UART.
+/// Print a line to the UART.
 fn out(args: core::fmt::Arguments) {
-    hal::println!("{}", args);
     if let Some(tx) = unsafe { &mut *(&raw mut TX) } {
         let _ = core::fmt::Write::write_fmt(tx, args);
         let _ = tx.blocking_write(b"\r\n");
@@ -125,16 +124,19 @@ async fn main(_spawner: Spawner) -> ! {
         rcc: hal::rcc::Config::SYSCLK_FREQ_62_4MHZ,
         ..Default::default()
     });
-    SDIPrint::enable();
     let tx = UartTx::new_blocking::<0>(p.UART0, p.PB7, uart::Config::default()).unwrap();
     unsafe { *(&raw mut TX) = Some(tx) };
     let mut c = Checks { pass: 0, fail: 0 };
     let mut rtc = Rtc::new(p.RTC, Config::default()).unwrap();
 
     let reason = pwr::reset_reason();
-    log!("reset reason: {:?}", reason);
     let k = kept();
-    if unsafe { (*k).magic } == MAGIC {
+    let second_boot = unsafe { (*k).magic } == MAGIC;
+    if !second_boot {
+        Timer::after_secs(2).await;
+    }
+    log!("reset reason: {:?}", reason);
+    if second_boot {
         // Second boot: after the shutdown.
         unsafe { (*k).magic = 0 };
         c.pass = unsafe { (*k).pass };
