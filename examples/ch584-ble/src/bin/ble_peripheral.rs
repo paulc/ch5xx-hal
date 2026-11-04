@@ -12,8 +12,9 @@
 //! counter has its own task, which notifies every subscribed connection
 //! (`notify_all`) without tracking connections itself.
 //!
-//! The HAL's executor runs TMOS and sleeps between radio events, as in
-//! `ble_adv`. Connect with a BLE app (e.g. nRF Connect) to
+//! The HAL's executor runs TMOS and sleeps between radio events, and the
+//! spare pins and the debug interface are set up for low current, as in
+//! `ble_adv` (power-cycle the board and flash at once). Connect with a BLE app (e.g. nRF Connect) to
 //! "ch584-peripheral".
 //!
 //! hw-test: manual. It needs a BLE central.
@@ -36,6 +37,8 @@ use hal::ble::gatt::*;
 use hal::ble::gatt_server::{self, Characteristic, Service, Uuid};
 use hal::ble::peripheral::{self, AdvData, Event};
 use hal::ble::{self, MacAddress};
+use hal::debug::set_debug_interface_enabled;
+use hal::gpio::{Input, Pull};
 use hal::mode::Blocking;
 use hal::peripherals::UART0;
 use hal::uart::{self, UartTx};
@@ -167,9 +170,20 @@ async fn main(spawner: Spawner) -> ! {
     });
     let tx = UartTx::new_blocking::<0>(p.UART0, p.PB7, uart::Config::default()).unwrap();
     LOG.lock(|log| *log.borrow_mut() = Some(tx));
+    // Spare pins get a pull-up: floating inputs draw current in sleep.
+    // Input drivers have no drop, so the pulls stay. Not PB7 (the log) or
+    // PA10/PA11 (the 32 kHz crystal).
+    macro_rules! pull_up {
+        ($($pin:ident),*) => { $( let _ = Input::new(p.$pin, Pull::Up); )* };
+    }
+    pull_up!(PA4, PA5, PA9, PA12, PA13, PA14, PA15);
+    pull_up!(PB4, PB5, PB6, PB8, PB10, PB11, PB12, PB13, PB14, PB15, PB16, PB17, PB22, PB23);
     log!("BLE peripheral, {}", ble::lib_version());
     // A chance for a debugger to connect before the chip starts sleeping.
     Timer::after_secs(2).await;
+    // The debug interface draws current in sleep: off after the pause, so
+    // a debugger can still catch the chip just after a reset.
+    set_debug_interface_enabled(false);
 
     // A random address, so a scanner does not show a cached name.
     let mut config = ble::Config::default();

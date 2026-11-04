@@ -8,9 +8,10 @@
 //! tolerance, however long the chip has slept. Check the advertising with
 //! a BLE scanner (a phone app, `blescan`): "ch584-advertiser".
 //!
-//! The chip sleeps most of the time, which keeps a debugger out: it waits
-//! 2 s after a reset before starting BLE, for one to connect (power-cycle
-//! the board to get there).
+//! For a current reading, every spare pin gets a pull-up and the debug
+//! interface goes off after a 2 s pause at reset, as in `sleep_current`.
+//! So a debugger can only connect in that pause: power-cycle the board and
+//! flash at once.
 //!
 //! hw-test: manual. It never reports a result.
 
@@ -24,6 +25,8 @@ use hal::ble::adv::AdvData;
 use hal::ble::ffi::*;
 use hal::ble::gap::*;
 use hal::ble::{self, MacAddress};
+use hal::debug::set_debug_interface_enabled;
+use hal::gpio::{Input, Pull};
 use hal::uart::{self, UartTx};
 use panic_halt as _;
 
@@ -87,6 +90,14 @@ async fn main(_spawner: Spawner) -> ! {
         ..Default::default()
     });
     let mut tx = UartTx::new_blocking::<0>(p.UART0, p.PB7, uart::Config::default()).unwrap();
+    // Spare pins get a pull-up: floating inputs draw current in sleep.
+    // Input drivers have no drop, so the pulls stay. Not PB7 (the log) or
+    // PA10/PA11 (the 32 kHz crystal).
+    macro_rules! pull_up {
+        ($($pin:ident),*) => { $( let _ = Input::new(p.$pin, Pull::Up); )* };
+    }
+    pull_up!(PA4, PA5, PA9, PA12, PA13, PA14, PA15);
+    pull_up!(PB4, PB5, PB6, PB8, PB10, PB11, PB12, PB13, PB14, PB15, PB16, PB17, PB22, PB23);
 
     // The UART clock stops in sleep: finish each line before the executor
     // can sleep.
@@ -100,6 +111,9 @@ async fn main(_spawner: Spawner) -> ! {
 
     log!("BLE advertiser (low power), {}", ble::lib_version());
     Timer::after_secs(2).await;
+    // The debug interface draws current in sleep: off after the pause, so
+    // a debugger can still catch the chip just after a reset.
+    set_debug_interface_enabled(false);
 
     let config = ble::Config::default();
     let mac: MacAddress = config.mac_addr;
