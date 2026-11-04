@@ -32,7 +32,9 @@ pub mod adv;
 pub mod ffi;
 pub mod gap;
 pub mod gatt;
+pub mod gatt_server;
 mod irq;
+pub mod peripheral;
 
 use core::ffi::CStr;
 use core::mem::MaybeUninit;
@@ -356,6 +358,31 @@ impl MacAddress {
             *b = unsafe { p.add(i).read_volatile() };
         }
         MacAddress(a)
+    }
+
+    /// A pseudo-random address, e.g. so a scanner does not show a name it
+    /// cached for the factory address.
+    ///
+    /// Mixes the factory address with the RTC and SysTick counts; not
+    /// cryptographic. The top two bits are set as for a static random
+    /// address, though the library still uses it as its public address.
+    pub fn random() -> Self {
+        let f = Self::factory().0;
+        let mut seed = u32::from_le_bytes([f[0], f[1], f[2], f[3]])
+            ^ (u32::from(f[4]) << 8 | u32::from(f[5]))
+            ^ clock()
+            ^ crate::delay::ticks();
+        let mut next = || {
+            // splitmix32
+            seed = seed.wrapping_add(0x9E37_79B9);
+            let mut z = seed;
+            z = (z ^ (z >> 16)).wrapping_mul(0x85EB_CA6B);
+            z = (z ^ (z >> 13)).wrapping_mul(0xC2B2_AE35);
+            z ^ (z >> 16)
+        };
+        let low = next().to_le_bytes();
+        let high = next().to_le_bytes();
+        MacAddress([low[0], low[1], low[2], low[3], high[0], high[1] | 0xC0])
     }
 
     /// From the usual written order, MSB first.
