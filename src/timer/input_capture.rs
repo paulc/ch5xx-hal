@@ -30,7 +30,7 @@
 //! measurement too. Reading keeps up with about one measurement per 500 HCLK
 //! cycles (tested at 60 MHz, from flash); faster signals overrun.
 //!
-//! # DMA (TMR1, TMR2)
+//! # DMA (TMR1/TMR2 on CH592, all four on CH584/CH585)
 //!
 //! [`InputCapture::read_dma`] moves raw FIFO entries into a RAM buffer, and
 //! [`InputCapture::decode`] turns them into measurements. It keeps up with
@@ -39,7 +39,7 @@
 //! capture carries on into the FIFO afterwards, so DMA and FIFO reads can be
 //! mixed: they form one stream.
 //!
-//! Pins are in the [module table](super#timer-pins-ch592).
+//! Pins are in the [module tables](super).
 
 use core::future::poll_fn;
 use core::marker::PhantomData;
@@ -66,8 +66,20 @@ const FIFO_SIZE: u8 = 8;
 /// `Falling`).
 const FLAG: u32 = 1 << 25;
 
-/// The RAM the timer DMA reaches: its address registers hold 15 bits.
+/// The RAM the timer DMA reaches: its address registers hold 15 bits on
+/// CH592.
+#[cfg(tmr_ch592)]
 const DMA_WINDOW: core::ops::Range<usize> = 0x2000_0000..0x2000_8000;
+/// The RAM the timer DMA reaches: 17 bits of address on CH584/CH585, so all
+/// of it.
+#[cfg(tmr_ch585)]
+const DMA_WINDOW: core::ops::Range<usize> = 0x2000_0000..0x2002_0000;
+/// `DMA_BEG`/`DMA_END`/`DMA_NOW` as written: byte addresses, word aligned.
+#[cfg(tmr_ch592)]
+type DmaAddr = u16;
+#[cfg(tmr_ch585)]
+type DmaAddr = u32;
+const DMA_ADDR_MASK: usize = DMA_WINDOW.end - DMA_WINDOW.start - 4;
 
 /// Which edges a measurement runs between.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -278,8 +290,8 @@ impl<'d, T: DmaInstance> InputCapture<'d, T, Async> {
     ///
     /// # Panics
     ///
-    /// If `buf` is empty or outside the first 32 KiB of RAM (the DMA's
-    /// reach), for instance in flash.
+    /// If `buf` is empty or outside the RAM the DMA reaches (the first 32 KiB
+    /// on CH592, all of it on CH584/CH585), for instance in flash.
     pub async fn read_dma(&mut self, buf: &mut [u32]) -> Result<(), Error> {
         self.check_overrun(T::regs().fifo_count().read().fifo_count())?;
         let end = start_dma::<T>(buf);
@@ -363,6 +375,7 @@ impl<'d, T: Instance, M: Mode> InputCapture<'d, T, M> {
             w.set_mode_in(true);
             w.set_cap_edge(cap_edge);
         });
+        #[cfg(tmr_ch592)]
         r.pwm_mod().write(|_| {});
         // Writing `CNT_END` also clears the count.
         r.cnt_end().write(|w| w.set_cnt_end(self.decoder.config.timeout));
@@ -461,24 +474,24 @@ impl<'d, T: Instance, M: Mode> Drop for InputCapture<'d, T, M> {
 }
 
 /// Point the DMA at `buf` and start it; returns the `DMA_END` value.
-fn start_dma<T: DmaInstance>(buf: &mut [u32]) -> u16 {
+fn start_dma<T: DmaInstance>(buf: &mut [u32]) -> DmaAddr {
     let start = buf.as_mut_ptr() as usize;
     let end = start + 4 * buf.len();
     if buf.is_empty() || !DMA_WINDOW.contains(&start) || end > DMA_WINDOW.end {
-        panic!("capture DMA buffer must be in the first 32 KiB of RAM");
+        panic!("capture DMA buffer must be in RAM the timer DMA reaches");
     }
     let r = T::dma_regs();
     r.ctrl_dma().write(|_| {});
     r.int_flag().write(|w| w.set_if_dma_end(true));
     // The address fields count words from bit 2: write byte addresses whole.
-    r.dma_beg().write(|w| w.0 = start as u16 & 0x7ffc);
-    r.dma_end().write(|w| w.0 = end as u16 & 0x7ffc);
+    r.dma_beg().write(|w| w.0 = (start & DMA_ADDR_MASK) as DmaAddr);
+    r.dma_end().write(|w| w.0 = (end & DMA_ADDR_MASK) as DmaAddr);
     compiler_fence(Ordering::SeqCst);
     r.ctrl_dma().write(|w| w.set_dma_enable(true));
-    end as u16 & 0x7ffc
+    (end & DMA_ADDR_MASK) as DmaAddr
 }
 
-fn dma_done<T: DmaInstance>(end: u16) -> bool {
+fn dma_done<T: DmaInstance>(end: DmaAddr) -> bool {
     T::dma_regs().dma_now().read().0 == end
 }
 
@@ -490,6 +503,6 @@ fn stop_dma<T: DmaInstance>() {
     compiler_fence(Ordering::SeqCst);
     r.inter_en().modify(|w| w.set_ie_dma_end(false));
     let now = r.dma_now().read().0;
-    r.dma_end().write(|w| w.0 = now.wrapping_add(0x100) & 0x7ffc);
+    r.dma_end().write(|w| w.0 = ((now as usize + 0x100) & DMA_ADDR_MASK) as DmaAddr);
     r.int_flag().write(|w| w.set_if_dma_end(true));
 }

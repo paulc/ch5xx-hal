@@ -18,6 +18,16 @@
 //! | 0     | PA12 | PA13 | PB0  | PB4  | PB6  | PB7  | PB14  | PB23  |
 //! | 1     | PA6  | PA7  | -    | -    | -    | -    | -     | -     |
 //!
+//! # Pins (CH584/CH585)
+//!
+//! | REMAP | PWM4 | PWM5 | PWM6 | PWM7 | PWM8 | PWM9 | PWM10 | PWM11 |
+//! |-------|------|------|------|------|------|------|-------|-------|
+//! | 0     | PA12 | PA13 | PB0  | PB4  | PB6  | PB7  | PB14  | PB23  |
+//! | 1     | PA6  | PA7  | -    | PB1  | PB2  | PB3  | -     | -     |
+//!
+//! The remapped channels share one remap bit: taking one of them moves the
+//! others too.
+//!
 //! PB14 is the debug link's TIO, and PB23 the RST# input when `CFG_RESET_EN`
 //! is set in the user config. CH592F bonds none of PB0, PB6, PA6 and PA7.
 
@@ -187,15 +197,15 @@ macro_rules! channel_fns {
     };
 }
 
-// Only PWM4/PWM5 have alternate pins; the others must not touch the shared
-// remap bit.
+// Only PWM4/PWM5 (and PWM7-PWM9 on CH584/CH585) have alternate pins; the
+// others must not touch the shared remap bit.
 channel_fns! {
     ch4, Pwm4Pin, 4, true;
     ch5, Pwm5Pin, 5, true;
     ch6, Pwm6Pin, 6, false;
-    ch7, Pwm7Pin, 7, false;
-    ch8, Pwm8Pin, 8, false;
-    ch9, Pwm9Pin, 9, false;
+    ch7, Pwm7Pin, 7, cfg!(any(ch584, ch585));
+    ch8, Pwm8Pin, 8, cfg!(any(ch584, ch585));
+    ch9, Pwm9Pin, 9, cfg!(any(ch584, ch585));
     ch10, Pwm10Pin, 10, false;
     ch11, Pwm11Pin, 11, false;
 }
@@ -307,3 +317,9 @@ impl_pwmx_pin!(Pwm8Pin, PB6, 0);
 impl_pwmx_pin!(Pwm9Pin, PB7, 0);
 impl_pwmx_pin!(Pwm10Pin, PB14, 0);
 impl_pwmx_pin!(Pwm11Pin, PB23, 0);
+#[cfg(any(ch584, ch585))]
+impl_pwmx_pin!(Pwm7Pin, PB1, 1);
+#[cfg(any(ch584, ch585))]
+impl_pwmx_pin!(Pwm8Pin, PB2, 1);
+#[cfg(any(ch584, ch585))]
+impl_pwmx_pin!(Pwm9Pin, PB3, 1);

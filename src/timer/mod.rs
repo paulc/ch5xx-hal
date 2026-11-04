@@ -1,4 +1,4 @@
-//! Timers (CH592)
+//! Timers
 //!
 //! CH5xx has two kinds of PWM, neither like the CH32 advanced/general timers:
 //!
@@ -15,6 +15,17 @@
 //! |-------|------|------|------|------|
 //! | 0     | PA9  | PA10 | PA11 | PB22 |
 //! | 1     | PB23 | PB10 | PB11 | -    |
+//!
+//! # Timer pins (CH584/CH585)
+//!
+//! | REMAP | TMR0 | TMR1 | TMR2 | TMR3 |
+//! |-------|------|------|------|------|
+//! | 0     | PA9  | PA10 | PA11 | PB22 |
+//! | 1     | PB23 | PB10 | PB11 | PA2  |
+//!
+//! All four have DMA there, against TMR1 and TMR2 on CH592. TMR3 is as the
+//! datasheet's pin table has it (PB22 "TMR3", PA2 "TMR3_"), and as checked on
+//! a CH584 at PB22; CH585SFR.h's comment on `RB_PIN_TMR3` swaps them.
 //!
 //! PA10/PA11 are the 32 kHz crystal pins and PB10/PB11 the USB pins. PB23 is
 //! also the RST# input: with `CFG_RESET_EN` set in the user config it is not
@@ -43,9 +54,16 @@ pub enum OutputPolarity {
     ActiveLow,
 }
 
+/// The registers common to all four timers: on CH592, TMR1/TMR2 add DMA.
+#[cfg(tmr_ch592)]
+pub(crate) type Regs = pac::tmr::TmrNodma;
+/// The registers common to all four timers, DMA included.
+#[cfg(tmr_ch585)]
+pub(crate) type Regs = pac::tmr::TmrFull;
+
 pub(crate) trait SealedInstance: crate::peripheral::RemapPeripheral {
-    /// The registers common to all four timers (TMR1/TMR2 add DMA).
-    fn regs() -> pac::tmr::TmrNodma;
+    /// The registers common to all four timers.
+    fn regs() -> Regs;
     /// Ungate the timer's clock.
     fn enable();
     /// Woken by the timer interrupt.
@@ -64,7 +82,7 @@ pub(crate) trait SealedDmaInstance {
     fn dma_regs() -> pac::tmr::TmrFull;
 }
 
-/// A `TMRx` timer with DMA: TMR1 and TMR2.
+/// A `TMRx` timer with DMA: TMR1 and TMR2 on CH592, all four on CH584/CH585.
 #[allow(private_bounds)]
 pub trait DmaInstance: Instance + SealedDmaInstance {}
 
@@ -85,6 +103,7 @@ impl<T: Instance> interrupt::typelevel::Handler<T::Interrupt> for InterruptHandl
     }
 }
 
+#[cfg(ch592)]
 mod ch592 {
     use super::*;
     use crate::sys::{set_clock_enabled, set_remap, ClockGate, RemapGroup};
@@ -92,8 +111,8 @@ mod ch592 {
     macro_rules! impl_timer {
         ($inst:ident, $gate:ident, $remap:expr) => {
             impl SealedInstance for peripherals::$inst {
-                fn regs() -> pac::tmr::TmrNodma {
-                    unsafe { pac::tmr::TmrNodma::from_ptr(pac::$inst.as_ptr()) }
+                fn regs() -> Regs {
+                    unsafe { Regs::from_ptr(pac::$inst.as_ptr()) }
                 }
 
                 fn enable() {
@@ -149,4 +168,62 @@ mod ch592 {
     pin_trait_impl!(crate::timer::TimerPin, TMR2, PA11, 0);
     pin_trait_impl!(crate::timer::TimerPin, TMR2, PB11, 1);
     pin_trait_impl!(crate::timer::TimerPin, TMR3, PB22, 0);
+}
+
+#[cfg(any(ch584, ch585))]
+mod ch585 {
+    use super::*;
+    use crate::sys::{set_clock_enabled, set_remap, ClockGate, RemapGroup};
+
+    macro_rules! impl_timer {
+        ($inst:ident, $gate:ident, $remap:ident) => {
+            impl SealedInstance for peripherals::$inst {
+                fn regs() -> Regs {
+                    pac::$inst
+                }
+
+                fn enable() {
+                    set_clock_enabled(ClockGate::$gate, true);
+                }
+
+                fn waker() -> &'static AtomicWaker {
+                    static WAKER: AtomicWaker = AtomicWaker::new();
+                    &WAKER
+                }
+            }
+
+            impl Instance for peripherals::$inst {
+                type Interrupt = crate::interrupt::typelevel::$inst;
+            }
+
+            impl crate::peripheral::RemapPeripheral for peripherals::$inst {
+                fn set_remap(remap: u8) {
+                    set_remap(RemapGroup::$remap, remap)
+                }
+            }
+
+            impl SealedDmaInstance for peripherals::$inst {
+                fn dma_regs() -> pac::tmr::TmrFull {
+                    pac::$inst
+                }
+            }
+
+            impl DmaInstance for peripherals::$inst {}
+        };
+    }
+
+    impl_timer!(TMR0, Tmr0, Tmr0);
+    impl_timer!(TMR1, Tmr1, Tmr1);
+    impl_timer!(TMR2, Tmr2, Tmr2);
+    impl_timer!(TMR3, Tmr3, Tmr3);
+
+    // The datasheet's pin table (see the module docs for TMR3).
+    pin_trait_impl!(crate::timer::TimerPin, TMR0, PA9, 0);
+    pin_trait_impl!(crate::timer::TimerPin, TMR0, PB23, 1);
+    pin_trait_impl!(crate::timer::TimerPin, TMR1, PA10, 0);
+    pin_trait_impl!(crate::timer::TimerPin, TMR1, PB10, 1);
+    pin_trait_impl!(crate::timer::TimerPin, TMR2, PA11, 0);
+    pin_trait_impl!(crate::timer::TimerPin, TMR2, PB11, 1);
+    pin_trait_impl!(crate::timer::TimerPin, TMR3, PB22, 0);
+    pin_trait_impl!(crate::timer::TimerPin, TMR3, PA2, 1);
 }

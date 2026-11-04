@@ -4,7 +4,7 @@
 //! [`Config::period`] - 1, then wraps to 0 and raises its wrap flag. The pin
 //! is taken as a [`CapturePin`].
 //!
-//! Pins are in the [module table](super#timer-pins-ch592).
+//! Pins are in the [module tables](super).
 
 use core::future::poll_fn;
 use core::marker::PhantomData;
@@ -140,6 +140,7 @@ impl<'d, T: Instance, M: Mode> Counter<'d, T, M> {
             w.set_cap_count(true);
             w.set_cap_edge(cap_edge);
         });
+        #[cfg(tmr_ch592)]
         r.pwm_mod().write(|_| {});
         r.cnt_end().write(|w| w.set_cnt_end(self.config.period + 2));
         r.int_flag().write(|w| w.0 = 0xff);

@@ -60,6 +60,7 @@ impl<'d, T: Instance> SimplePwm<'d, T> {
         let r = T::regs();
         r.inter_en().write(|_| {});
         r.ctrl_mod().write(|w| w.set_all_clear(true));
+        #[cfg(tmr_ch592)]
         r.pwm_mod().write(|_| {});
 
         let mut this = Self {

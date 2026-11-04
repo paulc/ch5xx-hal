@@ -121,7 +121,7 @@ pub mod rtc;
 pub mod soft_i2c;
 #[cfg(ch592)]
 pub mod spi;
-#[cfg(ch592)]
+#[cfg(any(tmr_ch592, tmr_ch585))]
 pub mod timer;
 pub mod uart;
 #[cfg(ch592)]
