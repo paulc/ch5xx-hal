@@ -5,8 +5,10 @@
 //!   'U' (0x55) is a square wave of one bit per level, 8 x `DL` HCLK cycles,
 //!   so each measurement has an exact expected value. This covers the three
 //!   modes, blocking and async reads, timeouts, measurements longer than the
-//!   timeout and FIFO overrun. 125000 baud is a level every 480 HCLK cycles;
-//!   at 250000 (240 cycles) reads from flash no longer keep up.
+//!   timeout and FIFO overrun. Blocking reads run at 125000 baud, a level
+//!   every 480 HCLK cycles; at 250000 (240 cycles) reads from flash no longer
+//!   keep up. The async read runs at 100000 (600 cycles): at 125000 it passes
+//!   or overruns depending on where the code lands in flash.
 //! - TMR3 (PB22, pulled up on the WeAct CH584F board, but the output
 //!   overrides that), TMR1 (PB10) and TMR2 (PB11) capture their pin while the
 //!   test drives it as a GPIO output, which checks their pin routing and the timeout of an input held
@@ -262,7 +264,7 @@ async fn main(_spawner: Spawner) -> ! {
         let mut tx = UartTx::new_blocking::<0>(
             p.UART1.reborrow(),
             unsafe { peripherals::PA9::steal() },
-            uart_config(125_000),
+            uart_config(100_000),
         )
         .unwrap();
         cap.restart();
@@ -275,8 +277,8 @@ async fn main(_spawner: Spawner) -> ! {
                 break;
             }
         }
-        let (ok, worst) = all_near(&got[..n], InputCaptureMode::BothEdges, bit_ticks(125_000));
-        hal::println!("async BothEdges at 125000 baud, {} results", n);
+        let (ok, worst) = all_near(&got[..n], InputCaptureMode::BothEdges, bit_ticks(100_000));
+        hal::println!("async BothEdges at 100000 baud, {} results", n);
         c.check("  each measurement within 2 ticks (worst deviation)", ok, worst);
         c.check("  79 levels then a timeout", n == 80, n as i64);
         if !ok {

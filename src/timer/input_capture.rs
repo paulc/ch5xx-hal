@@ -27,8 +27,11 @@
 //! is full, each new measurement overwrites the oldest unread one, so
 //! measurements are lost and the queue is out of order: the next read
 //! reports [`Error::Overrun`], empties the FIFO and drops the next (partial)
-//! measurement too. Reading keeps up with about one measurement per 500 HCLK
-//! cycles (tested at 60 MHz, from flash); faster signals overrun.
+//! measurement too. Blocking reads keep up with about one measurement per
+//! 500 HCLK cycles (tested at 60 MHz, from flash); faster signals overrun.
+//! Async reads also wake a task per measurement: allow about 600 cycles. At
+//! 480 they keep up or fall behind depending on where the code lands in
+//! flash, so an unrelated change elsewhere in the program can tip them.
 //!
 //! # DMA (TMR1/TMR2 on CH592, all four on CH584/CH585)
 //!
