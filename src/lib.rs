@@ -30,6 +30,9 @@
 //!   The package decides which pins exist.
 //! - `rt` (default): `qingke-rt` runtime and interrupt vectors.
 //! - `embassy`: the `embassy-time` driver on SysTick.
+//! - `executor`: `embassy::Executor`, an embassy executor that sleeps when
+//!   idle (in place of embassy-executor's `platform-*` ones).
+//! - `highcode`: interrupt entry and `.highcode` functions run from RAM.
 //! - `exti`: built-in GPIO interrupt handlers for `exti::ExtiInput`.
 //! - `memory-x`: emit `memory.x` for the selected chip.
 

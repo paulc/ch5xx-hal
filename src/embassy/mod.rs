@@ -1,4 +1,5 @@
-//! The time driver for the Embassy framework.
+//! The time driver for the Embassy framework, and (feature `executor`) a
+//! low-power executor.
 //!
 //! Ported from ch32-hal's SysTick driver. CH592 (QingKe V4C) has the same
 //! 64-bit SysTick counter/compare as the CH32V20x; CH584/CH585 (V3C) have a
@@ -7,6 +8,11 @@
 #[cfg(any(systick_ch583, systick_ch585))]
 #[path = "time_driver_systick.rs"]
 pub mod time_driver_impl;
+
+#[cfg(all(feature = "executor", any(systick_ch583, systick_ch585)))]
+mod executor;
+#[cfg(all(feature = "executor", any(systick_ch583, systick_ch585)))]
+pub use executor::Executor;
 
 /// Initialize the Embassy time driver.
 ///
