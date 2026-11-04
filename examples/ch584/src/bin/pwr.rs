@@ -33,7 +33,9 @@ use hal::uart::{self, UartTx};
 use panic_halt as _;
 
 /// Set once the board is known to have the DC-DC inductor (VSW to VDCID).
-const DCDC: bool = false;
+/// Without it the chip is expected to reset when DC-DC takes over: the next
+/// boot reports that and leaves DC-DC alone.
+const DCDC: bool = true;
 
 /// The output.
 static mut TX: Option<UartTx<'static, UART0, Blocking>> = None;
@@ -92,6 +94,22 @@ fn kept() -> *mut Kept {
     (&raw mut KEPT).cast()
 }
 
+/// Set while DC-DC is on, so a reset in that time is noticed.
+#[unsafe(link_section = ".uninit.pwr_test")]
+static mut DCDC_TRYING: MaybeUninit<u32> = MaybeUninit::uninit();
+
+const DCDC_MAGIC: u32 = 0x4443_4443;
+
+fn dcdc_trying(on: bool) {
+    unsafe { (&raw mut DCDC_TRYING).cast::<u32>().write_volatile(if on { DCDC_MAGIC } else { 0 }) };
+}
+
+/// Busy for `ms`, for a supply current reading.
+fn busy(ms: u64) {
+    let t0 = Instant::now();
+    while t0.elapsed().as_millis() < ms {}
+}
+
 /// Data the sleeps must keep.
 static mut PATTERN: [u32; 64] = [0; 64];
 
@@ -130,6 +148,8 @@ async fn main(_spawner: Spawner) -> ! {
     let mut rtc = Rtc::new(p.RTC, Config::default()).unwrap();
 
     let reason = pwr::reset_reason();
+    let dcdc_reset = unsafe { (&raw const DCDC_TRYING).cast::<u32>().read_volatile() } == DCDC_MAGIC;
+    dcdc_trying(false);
     let k = kept();
     let second_boot = unsafe { (*k).magic } == MAGIC;
     if !second_boot {
@@ -176,15 +196,27 @@ async fn main(_spawner: Spawner) -> ! {
     c.check("low-power monitor: 3.3 V is not low", !s.low);
     pwr::set_battery_monitor(BatteryMonitor::Off);
 
-    if DCDC {
+    if dcdc_reset {
+        c.check("no reset while on DC-DC (is the inductor fitted?)", false);
+    } else if DCDC && !matches!(reason, ResetReason::Software | ResetReason::Pin) {
+        // A power-on reset may be a supply glitch from the last try.
+        log!("DC-DC skipped after a {:?} reset: reset the chip to try it", reason);
+    } else if DCDC {
+        // Compare the supply current in the two (WCH: about 60% on DC-DC).
+        log!("busy 5 s on the LDO");
+        busy(5000);
+        log!("busy 5 s on DC-DC");
+        flush();
+        dcdc_trying(true);
         let r = pwr::enable_dcdc();
-        log!("enable_dcdc: {:?}", r);
-        c.check("DC-DC enables", r.is_ok() && pwr::is_dcdc_enabled());
-        // Measure the supply current now (WCH: about 60% of the LDO's).
-        let t0 = Instant::now();
-        while t0.elapsed().as_millis() < 3000 {}
-        c.check("still running on DC-DC", pwr::is_dcdc_enabled());
+        let on = pwr::is_dcdc_enabled();
+        busy(5000);
+        let still = pwr::is_dcdc_enabled();
         pwr::disable_dcdc();
+        dcdc_trying(false);
+        log!("enable_dcdc: {:?}", r);
+        c.check("DC-DC enables", r.is_ok() && on);
+        c.check("still running on DC-DC after 5 s", still);
         c.check("DC-DC disables", !pwr::is_dcdc_enabled());
     } else {
         log!("DC-DC skipped (set DCDC once the inductor is confirmed)");
