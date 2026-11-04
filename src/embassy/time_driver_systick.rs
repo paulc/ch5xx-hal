@@ -1,9 +1,20 @@
 //! SysTick-based time driver.
 //!
-//! The counter is the one [`crate::delay`] starts: 64-bit, up-counting at HCLK,
-//! never reset or reloaded. This driver only adds the compare interrupt.
+//! The counter is the one [`crate::delay`] starts: up-counting at HCLK, never
+//! reset or reloaded. This driver only adds the compare interrupt.
+//!
+//! On CH592 the counter and compare are 64 bits. On CH584/CH585 they are 32
+//! bits, wrapping every 55 s at 78 MHz, so the driver extends the count in
+//! software, as embassy-stm32 does for its 16-bit timers: `period` counts
+//! half-wraps, and the compare is always armed for the next half-wrap or the
+//! next alarm, whichever comes first, so the interrupt keeps `period` current.
+//! The compare fires on `CNT == CMP` only (checked on a CH584), so a compare
+//! value just passed does not fire until the counter comes round again; the
+//! arming code checks for that.
 
 use core::cell::RefCell;
+#[cfg(systick_ch585)]
+use core::sync::atomic::compiler_fence;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use critical_section::CriticalSection;
@@ -30,6 +41,11 @@ pub struct SystickDriver {
     /// `log2(den)` when `den` is a power of two (every HSE-divided HCLK, and
     /// 6.4 MHz), else `u32::MAX`: lets the hot path shift instead of divide.
     den_shift: AtomicU32,
+    /// 32-bit counter only: half-wraps so far. Even while the counter's top
+    /// bit is clear, odd while it is set, give or take an interrupt that has
+    /// yet to run.
+    #[cfg(systick_ch585)]
+    period: AtomicU32,
     queue: Mutex<CriticalSectionRawMutex, RefCell<Queue>>,
 }
 
@@ -37,6 +53,8 @@ embassy_time_driver::time_driver_impl!(static DRIVER: SystickDriver = SystickDri
     num: AtomicU32::new(1),
     den: AtomicU32::new(1), // avoid div by zero
     den_shift: AtomicU32::new(0),
+    #[cfg(systick_ch585)]
+    period: AtomicU32::new(0),
     queue: Mutex::new(RefCell::new(Queue::new()))
 });
 
@@ -72,9 +90,16 @@ impl SystickDriver {
             w.set_stclk(true);
             w.set_ste(true);
         });
-        r.stk_cmphr().write(|w| w.set_cmph(u32::MAX));
-        r.stk_cmplr().write(|w| w.set_cmpl(u32::MAX));
-        r.stk_sr().write(|w| w.set_cntif(false));
+        #[cfg(systick_ch583)]
+        {
+            r.stk_cmphr().write(|w| w.set_cmph(u32::MAX));
+            r.stk_cmplr().write(|w| w.set_cmpl(u32::MAX));
+            r.stk_sr().write(|w| w.set_cntif(false));
+        }
+        // The counter already ran since `delay` started it, but for less than
+        // half a wrap, so `period` 0 is right. Arm the first half-wrap.
+        #[cfg(systick_ch585)]
+        while !self.set_alarm(_cs, u64::MAX) {}
     }
 
     fn on_interrupt(&self) {
@@ -83,10 +108,13 @@ impl SystickDriver {
         r.stk_sr().write(|w| w.set_cntif(false)); // clear IF
 
         critical_section::with(|cs| {
+            #[cfg(systick_ch585)]
+            self.update_period(cs);
             self.trigger_alarm(cs);
         });
     }
 
+    #[cfg(systick_ch583)]
     #[inline]
     fn raw_cnt(&self) -> u64 {
         let r = pac::SYSTICK;
@@ -96,6 +124,28 @@ impl SystickDriver {
             if r.stk_cnth().read().cnth() == high {
                 return (u64::from(high) << 32) | u64::from(low);
             }
+        }
+    }
+
+    /// The counter, extended to 64 bits by `period`. Correct as long as
+    /// `period` lags the counter by less than half a wrap, which the
+    /// half-wrap compare keeps true (embassy-stm32's `calc_now`).
+    #[cfg(systick_ch585)]
+    #[inline]
+    fn raw_cnt(&self) -> u64 {
+        let period = self.period.load(Ordering::Relaxed);
+        compiler_fence(Ordering::Acquire);
+        let cnt = pac::SYSTICK.stk_cntl().read().cntl();
+        ((period as u64) << 31) + (cnt ^ ((period & 1) << 31)) as u64
+    }
+
+    /// Count the half-wraps the counter has made since `period` last moved.
+    #[cfg(systick_ch585)]
+    fn update_period(&self, _cs: CriticalSection) {
+        let period = self.period.load(Ordering::Relaxed);
+        let cnt = pac::SYSTICK.stk_cntl().read().cntl();
+        if cnt >> 31 != period & 1 {
+            self.period.store(period.wrapping_add(1), Ordering::Relaxed);
         }
     }
 
@@ -131,6 +181,7 @@ impl SystickDriver {
         }
     }
 
+    #[cfg(systick_ch583)]
     fn set_alarm(&self, _cs: CriticalSection, next_alarm_ticks: u64) -> bool {
         let r = pac::SYSTICK;
 
@@ -162,6 +213,49 @@ impl SystickDriver {
         }
 
         true
+    }
+
+    /// Arm the compare for the alarm or the next half-wrap, whichever comes
+    /// first. Returns `false` if the alarm has already passed; the half-wrap
+    /// is still armed then.
+    #[cfg(systick_ch585)]
+    fn set_alarm(&self, cs: CriticalSection, next_alarm_ticks: u64) -> bool {
+        let r = pac::SYSTICK;
+
+        let alarm_cnt = if next_alarm_ticks == u64::MAX {
+            u64::MAX
+        } else {
+            self.ticks_to_cnt(next_alarm_ticks)
+        };
+
+        loop {
+            self.update_period(cs);
+            let half_wrap = (self.period.load(Ordering::Relaxed) as u64 + 1) << 31;
+            let target = alarm_cnt.min(half_wrap);
+            r.stk_cmplr().write(|w| w.set_cmpl(target as u32));
+            r.stk_sr().write(|w| w.set_cntif(false));
+            r.stk_ctlr().modify(|w| w.set_stie(true));
+
+            // Equality compare: a target the counter reached before (or while)
+            // it was written will not fire until the next wrap. A match that
+            // happened after the write left `CNTIF` set, and the interrupt
+            // will run.
+            if self.raw_cnt() < target || r.stk_sr().read().cntif() {
+                return true;
+            }
+            if target == alarm_cnt {
+                // The alarm has passed; still arm the half-wrap.
+                let half_wrap = (self.period.load(Ordering::Relaxed) as u64 + 1) << 31;
+                r.stk_cmplr().write(|w| w.set_cmpl(half_wrap as u32));
+                if self.raw_cnt() >= half_wrap {
+                    // Passed it too while handling the alarm: go round again.
+                    self.update_period(cs);
+                    continue;
+                }
+                return false;
+            }
+            // Missed the half-wrap itself: `update_period` above picks it up.
+        }
     }
 }
 

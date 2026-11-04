@@ -1,10 +1,10 @@
 //! The time driver for the Embassy framework.
 //!
 //! Ported from ch32-hal's SysTick driver. CH592 (QingKe V4C) has the same
-//! 64-bit SysTick counter/compare as the CH32V20x. Not enabled for CH585, whose
-//! SysTick has not been checked.
+//! 64-bit SysTick counter/compare as the CH32V20x; CH584/CH585 (V3C) have a
+//! 32-bit one, which the driver extends.
 
-#[cfg(ch592)]
+#[cfg(any(systick_ch583, systick_ch585))]
 #[path = "time_driver_systick.rs"]
 pub mod time_driver_impl;
 
@@ -17,10 +17,10 @@ pub mod time_driver_impl;
 ///
 /// This function should be called only once.
 pub unsafe fn init() {
-    #[cfg(ch592)]
+    #[cfg(any(systick_ch583, systick_ch585))]
     critical_section::with(|cs| time_driver_impl::init(cs));
 }
 
 // No driver for this chip yet; keep the optional dependencies "used".
-#[cfg(not(ch592))]
+#[cfg(not(any(systick_ch583, systick_ch585)))]
 use {embassy_time_driver as _, embassy_time_queue_utils as _};

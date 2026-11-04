@@ -1,8 +1,9 @@
 //! Busy-wait delays on the core SysTick counter.
 //!
 //! CH5xx's SysTick is the WCH variant: `STK_CTLR` (`STE` bit 0, `STCLK` bit 2,
-//! `MODE` bit 4), `STK_SR.CNTIF`, and the 32-bit `STK_CNTL` / `STK_CMPLR` pair.
-//! There is no free-running 64-bit counter.
+//! `MODE` bit 4), `STK_SR.CNTIF`, and a counter/compare pair: 64 bits on
+//! CH592 (`STK_CNTL`/`STK_CNTH`), 32 bits on CH584/CH585 (`STK_CNTL` only).
+//! The delays use the low 32 bits.
 //!
 //! The counter is started **once** by [`crate::init`] and left running; each
 //! delay only reads `STK_CNT` and compares it against a target. The embassy
@@ -54,6 +55,7 @@ impl Delay {
         // would select HCLK/8). `STE` starts it.
         SYSTICK.stk_sr().modify(|w| w.set_cntif(false));
         SYSTICK.stk_cntl().write(|w| w.set_cntl(0));
+        #[cfg(systick_ch583)]
         SYSTICK.stk_cnth().write(|w| w.set_cnth(0));
         SYSTICK.stk_ctlr().modify(|w| {
             w.set_mode(false); // up-count
