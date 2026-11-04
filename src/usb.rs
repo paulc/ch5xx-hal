@@ -1,5 +1,7 @@
-//! USB full-speed device driver for [`embassy-usb`](https://docs.rs/embassy-usb)
-//! (CH592).
+//! USB full-speed device driver for [`embassy-usb`](https://docs.rs/embassy-usb).
+//!
+//! CH592's `USB` and CH584/CH585's `USBFS` (the full-speed controller;
+//! CH585's high-speed `USBHS` is not covered) are the same device block.
 //!
 //! The shape follows ch32-hal's `otg_fs` driver; the interrupt handling does
 //! not:
@@ -19,16 +21,17 @@
 //! isochronous endpoints and double buffering are not supported. A `write`
 //! or `read` future dropped before it completes leaves its packet armed.
 //!
-//! Tested: enumeration, control transfers with data both ways, and bulk
-//! OUT/IN as a CDC-ACM echo on a macOS host. Not yet tested: stall
+//! Tested on CH592: enumeration, control transfers with data both ways, and
+//! bulk OUT/IN as a CDC-ACM echo on a macOS host. Not yet tested: stall
 //! handling, remote wakeup.
 //!
 //! The USB PHY needs the 48 MHz clock from the PLL, so run the system clock
-//! from the PLL (e.g. `SYSCLK_FREQ_60MHZ`).
+//! from the PLL (e.g. `SYSCLK_FREQ_60MHZ` on CH592, `SYSCLK_FREQ_62_4MHZ` on
+//! CH584/CH585).
 //!
 //! ```ignore
 //! bind_interrupts!(struct Irqs {
-//!     USB => usb::InterruptHandler<peripherals::USB>;
+//!     USB => usb::InterruptHandler<peripherals::USB>; // USBFS on CH584/CH585
 //! });
 //! let driver = usb::Driver::new(p.USB, Irqs, p.PB11, p.PB10);
 //! ```
@@ -51,6 +54,15 @@ use crate::interrupt::typelevel::Interrupt as _;
 use crate::sys::{set_clock_enabled, ClockGate};
 use crate::{interrupt, pac, peripherals, Peri};
 
+#[cfg(usb_ch592)]
+use pac::usb as usbpac;
+#[cfg(usb_ch592)]
+const USB_REGS: usbpac::Usb = pac::USB;
+#[cfg(usbfs_ch585)]
+use pac::usbfs as usbpac;
+#[cfg(usbfs_ch585)]
+const USB_REGS: usbpac::Usbfs = pac::USBFS;
+
 /// Endpoints 0-7. The 8-15 extension (`R32_EPX_MODE`) is not used.
 const EP_COUNT: usize = 8;
 const MAX_PACKET_SIZE: u16 = 64;
@@ -65,7 +77,8 @@ const RES_ACK: u8 = 0b00;
 const RES_NAK: u8 = 0b10;
 const RES_STALL: u8 = 0b11;
 
-/// `R16_UEPn_DMA` holds a 16-bit RAM address.
+/// `R16_UEPn_DMA` holds a 16-bit RAM address (`R32_UEPn_DMA`, all of RAM,
+/// on CH584/CH585).
 #[repr(C, align(4))]
 struct Buffers {
     /// EP0 (shared by IN and OUT), then EP4's OUT and IN buffers.
@@ -123,30 +136,38 @@ static STATE: State = State {
     rx_len: [NEW_LEN; EP_COUNT],
 };
 
-type EpCtrl = pac::common::Reg<pac::usb::regs::Uep0Ctrl, pac::common::RW>;
-type EpTLen = pac::common::Reg<pac::usb::regs::Uep0TLen, pac::common::RW>;
-type EpDma = pac::common::Reg<pac::usb::regs::Uep0Dma, pac::common::RW>;
+type EpCtrl = pac::common::Reg<usbpac::regs::Uep0Ctrl, pac::common::RW>;
+type EpTLen = pac::common::Reg<usbpac::regs::Uep0TLen, pac::common::RW>;
 
 /// `R8_UEPn_CTRL`. All eight share one layout.
 fn ep_ctrl(ep: usize) -> EpCtrl {
     let off = if ep < 5 { 0x22 + 4 * ep } else { 0x52 + 4 * ep };
-    unsafe { EpCtrl::from_ptr((pac::USB.as_ptr() as *mut u8).add(off) as _) }
+    unsafe { EpCtrl::from_ptr((USB_REGS.as_ptr() as *mut u8).add(off) as _) }
 }
 
 /// `R8_UEPn_T_LEN`, just below `R8_UEPn_CTRL`.
 fn ep_t_len(ep: usize) -> EpTLen {
     let off = if ep < 5 { 0x20 + 4 * ep } else { 0x50 + 4 * ep };
-    unsafe { EpTLen::from_ptr((pac::USB.as_ptr() as *mut u8).add(off) as _) }
+    unsafe { EpTLen::from_ptr((USB_REGS.as_ptr() as *mut u8).add(off) as _) }
 }
 
-/// `R16_UEPn_DMA`. EP4 has none: its buffers follow EP0's.
-fn ep_dma(ep: usize) -> EpDma {
+/// Point `R16_UEPn_DMA` (`R32_UEPn_DMA` on CH584/CH585, written whole as
+/// WCH's SDK does) at `buf`. EP4 has none: its buffers follow EP0's.
+fn set_ep_dma(ep: usize, buf: *mut u8) {
     let off = match ep {
         0..=3 => 0x10 + 4 * ep,
         5..=7 => 0x40 + 4 * ep,
         _ => unreachable!(),
     };
-    unsafe { EpDma::from_ptr((pac::USB.as_ptr() as *mut u8).add(off) as _) }
+    let reg = unsafe { (USB_REGS.as_ptr() as *mut u8).add(off) };
+    #[cfg(usb_ch592)]
+    unsafe {
+        (reg as *mut u16).write_volatile(buf as u16)
+    };
+    #[cfg(usbfs_ch585)]
+    unsafe {
+        (reg as *mut u32).write_volatile(buf as u32)
+    };
 }
 
 /// Start of the DMA region for `ep` (EP0 and EP4 share one).
@@ -162,7 +183,7 @@ fn ep_base(ep: usize) -> *mut u8 {
 }
 
 fn mod_bits(ep: usize) -> (bool, bool) {
-    let r = pac::USB;
+    let r = USB_REGS;
     match ep {
         1 => {
             let m = r.uep4_1_mod().read();
@@ -245,7 +266,7 @@ pub struct InterruptHandler<T: Instance> {
 
 impl<T: Instance> interrupt::typelevel::Handler<T::Interrupt> for InterruptHandler<T> {
     unsafe fn on_interrupt() {
-        let r = pac::USB;
+        let r = USB_REGS;
         let fg = r.int_fg().read();
 
         if fg.uif_transfer() {
@@ -339,7 +360,7 @@ impl<T: Instance> interrupt::typelevel::Handler<T::Interrupt> for InterruptHandl
 
 /// Back to the default state: address 0, every endpoint but EP0 disabled.
 fn bus_reset() {
-    let r = pac::USB;
+    let r = USB_REGS;
     r.dev_ad().write(|w| w.set_mask_usb_addr(0));
     r.uep4_1_mod().write(|_| {});
     r.uep2_3_mod().write(|_| {});
@@ -458,7 +479,7 @@ impl<'d, T: Instance> embassy_usb_driver::Driver<'d> for Driver<'d, T> {
 
     fn start(self, control_max_packet_size: u16) -> (Self::Bus, Self::ControlPipe) {
         assert!(control_max_packet_size <= MAX_PACKET_SIZE);
-        let r = pac::USB;
+        let r = USB_REGS;
 
         T::Interrupt::disable();
         r.ctrl().write(|w| {
@@ -469,12 +490,12 @@ impl<'d, T: Instance> embassy_usb_driver::Driver<'d> for Driver<'d, T> {
         r.ctrl().write(|_| {});
 
         for ep in [0, 1, 2, 3, 5, 6, 7] {
-            ep_dma(ep).write_value(pac::usb::regs::Uep0Dma(ep_base(ep) as u16));
+            set_ep_dma(ep, ep_base(ep));
         }
         bus_reset();
         STATE.bus_events.store(0, Ordering::Relaxed);
 
-        r.int_fg().write_value(pac::usb::regs::IntFg(0xff));
+        r.int_fg().write_value(usbpac::regs::IntFg(0xff));
         r.int_en().write(|w| {
             w.set_uie_bus_rst__uie_detect(true);
             w.set_uie_transfer(true);
@@ -503,6 +524,21 @@ impl<'d, T: Instance> embassy_usb_driver::Driver<'d> for Driver<'d, T> {
     }
 }
 
+/// Hand PB10/PB11 to the PHY (`RB_PIN_USB_IE`), or take them back. On
+/// CH584/CH585 also the D+ pull-up enable that WCH's `USB_DeviceInit` sets
+/// with it (`RB_PIN_USB_EN`, `RB_UDP_PU_EN`).
+fn set_pins_enabled(on: bool) {
+    critical_section::with(|_| {
+        #[cfg(sys_ch592)]
+        pac::SYS.pin_analog_ie().modify(|w| w.set_pin_usb_ie(on));
+        #[cfg(sys_ch585)]
+        pac::SYS.pin_config().modify(|w| {
+            w.set_pin_usb_en(on);
+            w.set_udp_pu_en(on);
+        });
+    })
+}
+
 /// USB bus.
 pub struct Bus<'d, T: Instance> {
     _phantom: PhantomData<&'d mut T>,
@@ -511,8 +547,8 @@ pub struct Bus<'d, T: Instance> {
 
 impl<'d, T: Instance> embassy_usb_driver::Bus for Bus<'d, T> {
     async fn enable(&mut self) {
-        let r = pac::USB;
-        critical_section::with(|_| pac::SYS.pin_analog_ie().modify(|w| w.set_pin_usb_ie(true)));
+        let r = USB_REGS;
+        set_pins_enabled(true);
         r.udev_ctrl().write(|w| {
             // The pull-downs are for host mode.
             w.set_ud_pd_dis(true);
@@ -522,10 +558,10 @@ impl<'d, T: Instance> embassy_usb_driver::Bus for Bus<'d, T> {
     }
 
     async fn disable(&mut self) {
-        let r = pac::USB;
+        let r = USB_REGS;
         r.ctrl().modify(|w| w.set_uc_dev_pu_en(false));
         r.udev_ctrl().write(|w| w.set_ud_pd_dis(true));
-        critical_section::with(|_| pac::SYS.pin_analog_ie().modify(|w| w.set_pin_usb_ie(false)));
+        set_pins_enabled(false);
     }
 
     async fn poll(&mut self) -> Event {
@@ -559,7 +595,7 @@ impl<'d, T: Instance> embassy_usb_driver::Bus for Bus<'d, T> {
         if ep == 0 || ep >= EP_COUNT {
             return;
         }
-        let r = pac::USB;
+        let r = USB_REGS;
         let bit = 1 << ep;
         let out = ep_addr.direction() == Direction::Out;
 
@@ -656,7 +692,7 @@ impl<'d, T: Instance> embassy_usb_driver::Bus for Bus<'d, T> {
     async fn remote_wakeup(&mut self) -> Result<(), Unsupported> {
         // WCH's SDK signals resume (K state) by briefly switching the port
         // to low speed, which swaps the pull-up over to D-.
-        let r = pac::USB;
+        let r = USB_REGS;
         r.udev_ctrl().modify(|w| w.set_ud_low_speed(true));
         crate::delay::Delay.delay_ms(2);
         r.udev_ctrl().modify(|w| w.set_ud_low_speed(false));
@@ -916,7 +952,7 @@ impl<'d, T: Instance> embassy_usb_driver::ControlPipe for ControlPipe<'d, T> {
     async fn accept_set_address(&mut self, addr: u8) {
         // The new address applies after the status stage.
         self.accept().await;
-        pac::USB.dev_ad().modify(|w| w.set_mask_usb_addr(addr));
+        USB_REGS.dev_ad().modify(|w| w.set_mask_usb_addr(addr));
     }
 }
 
@@ -932,18 +968,27 @@ pub trait Instance: SealedInstance + embassy_hal_internal::PeripheralType + 'sta
     type Interrupt: interrupt::typelevel::Interrupt;
 }
 
-impl SealedInstance for peripherals::USB {
-    fn enable() {
-        set_clock_enabled(ClockGate::Usb, true);
-    }
-}
+macro_rules! impl_usb {
+    ($inst:ident) => {
+        impl SealedInstance for peripherals::$inst {
+            fn enable() {
+                set_clock_enabled(ClockGate::Usb, true);
+            }
+        }
 
-impl Instance for peripherals::USB {
-    type Interrupt = crate::interrupt::typelevel::USB;
+        impl Instance for peripherals::$inst {
+            type Interrupt = crate::interrupt::typelevel::USB;
+        }
+
+        pin_trait_impl!(crate::usb::DpPin, $inst, PB11, 0);
+        pin_trait_impl!(crate::usb::DmPin, $inst, PB10, 0);
+    };
 }
 
 pin_trait!(DpPin, Instance);
 pin_trait!(DmPin, Instance);
 
-pin_trait_impl!(crate::usb::DpPin, USB, PB11, 0);
-pin_trait_impl!(crate::usb::DmPin, USB, PB10, 0);
+#[cfg(usb_ch592)]
+impl_usb!(USB);
+#[cfg(usbfs_ch585)]
+impl_usb!(USBFS);

@@ -124,7 +124,7 @@ pub mod spi;
 #[cfg(any(tmr_ch592, tmr_ch585))]
 pub mod timer;
 pub mod uart;
-#[cfg(ch592)]
+#[cfg(any(usb_ch592, usbfs_ch585))]
 pub mod usb;
 #[cfg(any(sys_ch592, sys_ch585))]
 pub mod wdg;
