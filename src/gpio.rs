@@ -221,7 +221,7 @@ pub(crate) trait SealedPin {
             AfType::Input(pull) => {
                 self.set_direction(false);
                 self.set_pull(pull);
-                #[cfg(ch592)]
+                #[cfg(any(sys_ch592, sys_ch585))]
                 self.set_digital_input(true);
             }
             AfType::Output(speed) => {
@@ -240,20 +240,20 @@ pub(crate) trait SealedPin {
         critical_section::with(|_| {
             self.set_direction(false);
             self.set_pull(Pull::None);
-            #[cfg(ch592)]
+            #[cfg(any(sys_ch592, sys_ch585))]
             self.set_digital_input(true);
         })
     }
 
     /// Make the pin an analog input: floating, with its digital input off
     /// where the chip allows it.
-    #[cfg_attr(not(ch592), allow(unused))]
+    #[allow(unused)]
     #[inline]
     fn set_as_analog(&self) {
         critical_section::with(|_| {
             self.set_direction(false);
             self.set_pull(Pull::None);
-            #[cfg(ch592)]
+            #[cfg(any(sys_ch592, sys_ch585))]
             self.set_digital_input(false);
         })
     }
@@ -262,7 +262,7 @@ pub(crate) trait SealedPin {
     ///
     /// The bits pack like the PB interrupt bits: PA*n* is bit *n*, PB*n* bit
     /// 16 + *n*, and PB22/PB23 bits 24/25.
-    #[cfg(ch592)]
+    #[cfg(sys_ch592)]
     #[inline]
     fn set_digital_input(&self, enabled: bool) {
         let n = self._pin();
@@ -278,6 +278,31 @@ pub(crate) trait SealedPin {
                 w.0 |= 1 << bit
             }
         });
+    }
+
+    /// Turn the pin's digital input buffer on or off: `R32_PIN_IN_DIS` for
+    /// PA0-PA15 (bit *n*) and PB0-PB15 (bit 16 + *n*), `R16_PIN_CONFIG` bits
+    /// 8-15 for PB16-PB23, as WCH's `GPIOxDigitalCfg`.
+    #[cfg(sys_ch585)]
+    #[inline]
+    fn set_digital_input(&self, enabled: bool) {
+        let n = self._pin();
+        let set = |w: &mut u32, bit: u8| {
+            if enabled {
+                *w &= !(1 << bit)
+            } else {
+                *w |= 1 << bit
+            }
+        };
+        match self._port() {
+            Port::A => pac::SYS.pin_in_dis().modify(|w| set(&mut w.0, n)),
+            Port::B if n < 16 => pac::SYS.pin_in_dis().modify(|w| set(&mut w.0, 16 + n)),
+            Port::B => pac::SYS.pin_config().modify(|w| {
+                let mut v = w.0 as u32;
+                set(&mut v, n - 8);
+                w.0 = v as u16
+            }),
+        }
     }
 
     /// Set the drive strength (only meaningful for an output).
@@ -346,7 +371,7 @@ impl<'d> Flex<'d> {
         critical_section::with(|_| {
             self.pin.set_direction(false);
             self.pin.set_pull(pull);
-            #[cfg(ch592)]
+            #[cfg(any(sys_ch592, sys_ch585))]
             self.pin.set_digital_input(true);
         });
     }
