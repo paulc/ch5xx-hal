@@ -96,7 +96,7 @@ board by the test examples in `examples/ch592` and `examples/ch584`.
 | Module | Driver | HW CH592 | HW CH584 |
 | ------ | ------ | -------- | -------- |
 | `debug` | SDI print (`println!` over the debug link; `sdi_writeln!` for raw bytes) | yes | yes |
-| `embassy` | `embassy-time` driver on SysTick (feature `embassy`) | yes | yes |
+| `embassy` | `embassy-time` driver on SysTick (feature `embassy`); `Executor`, a thread-mode executor that sleeps when idle (feature `executor`) | yes (executor untested) | yes |
 | `exti` | `ExtiInput` pin interrupts, async edge/level waits (feature `exti`) | yes | yes |
 | `uart` | UART0-3, blocking and async, `embedded-io(-async)` | yes | yes |
 | `spi` | SPI0 master, blocking and async, `embedded-hal(-async)` | yes (alternate pins PB12-PB15 untested) | yes (alternate pins untested) |
@@ -111,10 +111,11 @@ board by the test examples in `examples/ch592` and `examples/ch584`.
 | `soft_i2c` | bit-bang I2C master on any two pins, clocked by TMR0-3, blocking and async, `embedded-hal(-async)`; up to 100 kHz with feature `highcode` | yes (waveform, stretching, errors; devices not yet) | yes (as CH592) |
 | `usb` | full-speed device for `embassy-usb` (`USBFS` on CH584/CH585) | yes (CDC-ACM echo; stall and remote wakeup untested) | enumerates (echo untested) |
 | `ledc` | LED screen controller (CH584/CH585): clock plus 1/2/4/8 data lanes, blocking (FIFO) and async (DMA) | - | yes (clock and lane 4, the only data pin the CH584F bonds; WCH supports the block on QFN48 parts only) |
+| `ble` | WCH's BLE library (vendored): FFI bindings (TMOS, GAP, GATT), init, a GATT server and peripheral helpers, advertising data builder; with `embassy::Executor`, sleep between BLE events (features `ble`, `executor`) | builds; not yet run | advertising, sleeping between events (`ble_sleep`); connections not yet tested |
 | `pwr` | DC-DC converter; idle, halt, sleep and shutdown modes with GPIO/RTC/USB/battery wake-up; battery voltage monitor; reset reason | not yet (`pwr` example) | yes (`pwr`, `sleep_current` examples) |
 
-Not implemented: BLE, timer PWM DMA, and on CH584/CH585
-USBHS, SPI1, LCD and touch-key.
+Not implemented: timer PWM DMA, and on CH584/CH585 USBHS, SPI1, LCD and
+touch-key. BLE has no bonding (SNV) or central role helpers yet.
 
 ## What differs from CH32
 
@@ -149,6 +150,28 @@ first atomic instruction of an `imac` build traps. The runner is
 PA14-PA15 jumper too. On that board PB10/PB11 go to the USB connector (with
 a host attached they read low through the pull-ups, so `soft_i2c` uses
 PA10/PA11 there) and PB22 has a strong pull-up.
+
+`examples/ch584-ble` holds the BLE examples for the same board, on the HAL's
+low-power executor (`ch5xx_hal::embassy::Executor`, which cannot share a
+build with embassy-executor's `platform-*` executors, hence the separate
+crate). They link WCH's BLE library, so `build.rs` adds `-Tble.x` after
+`-Tlink.x`, and they log on UART0 TX (PB7), as SDI print stops at the first
+sleep:
+
+- `ble_adv`: scannable advertiser ("ch584-advertiser") with the counters
+  and embassy time against the RTC every 5 s.
+- `ble_peripheral`: connectable peripheral ("ch584-peripheral") with a GATT
+  service (0xFFE0: read/write data, notifying counter), using the
+  `gatt_server` and `peripheral` helpers.
+- `ble_sleep`: a test: advertises for 20 s while sleeping, timing embassy
+  timers against the RTC, then checks the sleep count, advertising, embassy
+  time drift and timer accuracy. It reports on the UART and leaves its
+  results in registers for `wlink regs`, which an unattended run can read
+  (see its source).
+
+Each waits for the 32 kHz crystal (about 0.5 s) at start; after that the
+chip mostly sleeps and the debugger cannot attach, so power-cycle the board
+and flash at once.
 
 `examples/ch585` blinks LED0 (PB16) and LED1 (PB17) in opposite phase. Its
 runner is `probe-rs run --chip CH585`, which flashes, resets and streams
@@ -216,7 +239,7 @@ before) wired to a WCH-LinkE:
 | LinkE SWDIO - PB14 (TIO), SWCLK - PB15 (TCK), GND | flashing and SDI print (`CFG_DEBUG_EN` set in the user config) |
 | LinkE 5V - board 5V pin | power; from the LinkE's 3.3 V instead, the board's regulator (ME6231) is back-fed and draws about 0.55 mA, which spoils current readings |
 | PA14 - PA15 jumper | loopback for `spi`, `soft_i2c` and `uart_async` |
-| PB7 (UART0 TX) - LinkE RX | serial log for the tests that cannot use SDI print (`pwr`, `sleep_current`), 115200 8N1 on the LinkE's serial port |
+| PB7 (UART0 TX) - LinkE RX | serial log for the tests that cannot use SDI print (`pwr`, `sleep_current`, the BLE examples), 115200 8N1 on the LinkE's serial port |
 
 The board's USB port goes to the host (`usb_cdc`; it is also why PB10/PB11
 read low). For current readings, a meter goes in series with the 5 V supply.
