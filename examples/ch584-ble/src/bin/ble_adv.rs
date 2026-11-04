@@ -8,6 +8,9 @@
 //! tolerance, however long the chip has slept. Check the advertising with
 //! a BLE scanner (a phone app, `blescan`): "ch584-advertiser".
 //!
+//! Features for a current reading: `adv-1s` advertises every second
+//! instead, `quiet` drops the log (and the UART).
+//!
 //! For a current reading, every spare pin gets a pull-up and the debug
 //! interface goes off after a 2 s pause at reset, as in `sleep_current`.
 //! So a debugger can only connect in that pause: power-cycle the board and
@@ -27,6 +30,7 @@ use hal::ble::gap::*;
 use hal::ble::{self, MacAddress};
 use hal::debug::set_debug_interface_enabled;
 use hal::gpio::{Input, Pull};
+#[cfg(not(feature = "quiet"))]
 use hal::uart::{self, UartTx};
 use panic_halt as _;
 
@@ -34,8 +38,12 @@ const SHORT_NAME: &str = "ch584-adv";
 const NAME: &str = "ch584-advertiser";
 /// Nanjing Qinheng Microelectronics Co., Ltd. (WCH)
 const WCH_COMPANY_ID: u16 = 0x07D7;
-/// Advertising interval in 0.625 ms units (100 ms)
+/// Advertising interval in 0.625 ms units: 100 ms, or 1 s with feature
+/// `adv-1s`.
+#[cfg(not(feature = "adv-1s"))]
 const ADVERTISING_INTERVAL: u16 = 160;
+#[cfg(feature = "adv-1s")]
+const ADVERTISING_INTERVAL: u16 = 1600;
 
 static mut STATE: gapRole_States_t = 0;
 
@@ -89,7 +97,10 @@ async fn main(_spawner: Spawner) -> ! {
         rcc: hal::rcc::Config::SYSCLK_FREQ_62_4MHZ,
         ..Default::default()
     });
+    #[cfg(not(feature = "quiet"))]
     let mut tx = UartTx::new_blocking::<0>(p.UART0, p.PB7, uart::Config::default()).unwrap();
+    #[cfg(feature = "quiet")]
+    let _ = Input::new(p.PB7, Pull::Up);
     // Spare pins get a pull-up: floating inputs draw current in sleep.
     // Input drivers have no drop, so the pulls stay. Not PB7 (the log) or
     // PA10/PA11 (the 32 kHz crystal).
@@ -101,11 +112,19 @@ async fn main(_spawner: Spawner) -> ! {
 
     // The UART clock stops in sleep: finish each line before the executor
     // can sleep.
+    #[cfg(not(feature = "quiet"))]
     macro_rules! log {
         ($($t:tt)*) => {{
             let _ = core::fmt::Write::write_fmt(&mut tx, format_args!($($t)*));
             let _ = tx.blocking_write(b"\r\n");
             let _ = tx.blocking_flush();
+        }};
+    }
+    // With `quiet`, no log (it keeps the chip awake about 9 ms a line).
+    #[cfg(feature = "quiet")]
+    macro_rules! log {
+        ($($t:tt)*) => {{
+            let _ = |f: &mut dyn core::fmt::Write| f.write_fmt(format_args!($($t)*));
         }};
     }
 

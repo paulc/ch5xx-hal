@@ -159,7 +159,9 @@ crate). They link WCH's BLE library, so `build.rs` adds `-Tble.x` after
 sleep:
 
 - `ble_adv`: scannable advertiser ("ch584-advertiser") with the counters
-  and embassy time against the RTC every 5 s.
+  and embassy time against the RTC every 5 s. For a current reading,
+  `--features adv-1s,quiet` advertises every second with no log: on the
+  CH584F (spare pins pulled up, debug off) the floor is about 9 uA.
 - `ble_peripheral`: connectable peripheral ("ch584-peripheral") with a GATT
   service (0xFFE0: read/write data, notifying counter), using the
   `gatt_server` and `peripheral` helpers.
