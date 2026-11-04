@@ -99,7 +99,7 @@ board by the test examples in `examples/ch592` and `examples/ch584`.
 | `i2c` | I2C0 master, blocking and async, `embedded-hal(-async)`; on CH592 on PB15/PB14, so it turns the debug interface off | yes (bus scan) | yes (no device: NACKs, stuck-line errors and recovery) |
 | `soft_i2c` | bit-bang I2C master on any two pins, clocked by TMR0-3, blocking and async, `embedded-hal(-async)`; up to 100 kHz with feature `highcode` | yes (waveform, stretching, errors; devices not yet) | yes (as CH592) |
 | `usb` | full-speed device for `embassy-usb` (`USBFS` on CH584/CH585) | yes (CDC-ACM echo; stall and remote wakeup untested) | enumerates (echo untested) |
-| `ledc` | LED screen controller (CH584/CH585): clock plus 1/2/4/8 data lanes, blocking (FIFO) and async (DMA) | - | yes (clock and lane 4, the only data pin the CH584F bonds) |
+| `ledc` | LED screen controller (CH584/CH585): clock plus 1/2/4/8 data lanes, blocking (FIFO) and async (DMA) | - | yes (clock and lane 4, the only data pin the CH584F bonds; WCH supports the block on QFN48 parts only) |
 
 Not implemented: BLE, low-power modes, timer PWM DMA, and on CH584/CH585
 USBHS, SPI1, LCD and touch-key.
@@ -193,6 +193,25 @@ queue for good. Without A, embassy and the HAL (through `portable-atomic`)
 make atomic read-modify-writes in a critical section. `wake_race` checks this;
 built with `--target riscv32imac-unknown-none-elf` it fails. Applications on
 CH592 should use `riscv32imc` too.
+
+### Running the hardware tests
+
+`examples/hw-test.sh` flashes each test of an example crate, captures its SDI
+print output until it reports a result, and prints a summary; its exit
+status is the number of tests that failed or reported nothing:
+
+```console
+examples/hw-test.sh examples/ch584                # every test
+examples/hw-test.sh examples/ch584 ledc spi       # some
+CARGO_ARGS="--no-default-features --features platform-riscv32" \
+    examples/hw-test.sh examples/ch584            # the other executor
+```
+
+It uses the crate's runner with `--enable-sdi-print --watch-serial` added;
+set `RUNNER` to use another (cargo appends the ELF path). The SDI console
+sometimes fails to start, so a test that prints nothing is retried
+(`TRIES`, default 3). Logs go to `<crate>/target/hw-test`. The tests that
+need wiring (the PA14-PA15 jumper) say so in their source.
 
 The examples enable the HAL's `highcode` feature, which runs interrupt entry
 and the functions placed in `.highcode` from RAM: CH592 flash runs code
