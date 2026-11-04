@@ -25,7 +25,7 @@
 //!
 //! A debugger attach can change the clock: wlink sets `CLK_CFG` to `0x014D`
 //! (HSI PLL / 13 = 24 MHz) when it connects to a CH585. A program that a
-//! debugger reset is unaffected, since [`init`] runs after the reset.
+//! debugger reset is unaffected, since [`init`](crate::init) runs after the reset.
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
