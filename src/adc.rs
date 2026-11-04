@@ -1,7 +1,8 @@
-//! Analog to Digital Converter (CH592)
+//! Analog to Digital Converter
 //!
 //! A 12-bit SAR ADC shared with the touch-key block. Unlike the CH32 ADC it
-//! has no sample-time setting; what it does have shapes the API:
+//! has little control of the sample time (none on CH592, 4 to 7 ADC clocks
+//! on CH584/CH585); what it does have shapes the API:
 //!
 //! - A PGA in front of the converter ([`Gain`], 1/4 to 16x). The input range
 //!   is centred on the internal reference VINTA (Vref, about 1.05 V), not on
@@ -36,6 +37,15 @@
 //! | Pin | PA4 | PA5 | PA12 | PA13 | PA14 | PA15 | PB0 | PB6 | PA6 | PA7 | PA8 | PA9 |
 //!
 //! Channel 14 is VBAT and 15 the temperature sensor; 6 and 7 do not exist.
+//!
+//! # Channels (CH584/CH585)
+//!
+//! | AIN | 0   | 1   | 2    | 3    | 4    | 5    | 6   | 7   | 8   | 9   | 10  | 11  | 12  | 13  |
+//! |-----|-----|-----|------|------|------|------|-----|-----|-----|-----|-----|-----|-----|-----|
+//! | Pin | PA4 | PA5 | PA12 | PA13 | PA14 | PA15 | PA3 | PA2 | PA1 | PA0 | PA6 | PA7 | PA8 | PA9 |
+//!
+//! Channel 14 is VBAT and 15 the temperature sensor, as on CH592. CH584F and
+//! CH585F bond only AIN0-AIN5 and AIN13.
 
 use core::future::poll_fn;
 use core::marker::PhantomData;
@@ -68,6 +78,7 @@ const CH_TEMP: u8 = 15;
 const ROM_CFG_TMP_25C: *const u32 = 0x0007_f014 as *const u32;
 
 /// ADC clock, from the 32 MHz clock. A conversion takes about 17 ADC clocks.
+#[cfg(adc_ch592)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum SampleClock {
@@ -82,6 +93,7 @@ pub enum SampleClock {
     Div8,
 }
 
+#[cfg(adc_ch592)]
 impl SampleClock {
     fn bits(self) -> u8 {
         match self {
@@ -91,6 +103,50 @@ impl SampleClock {
             Self::Div8 => 0b11,
         }
     }
+}
+
+/// ADC clock (CH584/CH585). The source is CK32M, the HSE, when the system
+/// clock comes from it or from the PLL it feeds (`R16_CLK_SYS_CFG` bit 9,
+/// `OSC32M_SEL`), and CK16M, the HSI, otherwise. A conversion takes about
+/// 13 ADC clocks plus the [`SampleTime`]; the ADC runs at up to 8 MHz.
+#[cfg(adc_ch585)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum SampleClock {
+    /// CK16M / 2 = 8 MHz. Not from CK32M, where it would be 16 MHz:
+    /// [`Adc::new`] panics.
+    Div2,
+    /// CK32M / 4 = 8 MHz, CK16M / 4 = 4 MHz
+    Div4,
+    /// CK32M / 6 = 5.33 MHz, CK16M / 6 = 2.67 MHz (the reset value)
+    #[default]
+    Div6,
+    /// CK32M / 8 = 4 MHz, CK16M / 8 = 2 MHz
+    Div8,
+}
+
+#[cfg(adc_ch585)]
+impl SampleClock {
+    fn bits(self) -> u8 {
+        match self {
+            Self::Div2 => 0b00,
+            Self::Div4 => 0b01,
+            Self::Div6 => 0b10,
+            Self::Div8 => 0b11,
+        }
+    }
+}
+
+/// How long the ADC samples its input (CH584/CH585), in ADC clocks.
+#[cfg(adc_ch585)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum SampleTime {
+    #[default]
+    Clocks4 = 0,
+    Clocks5 = 1,
+    Clocks6 = 2,
+    Clocks7 = 3,
 }
 
 /// PGA gain.
@@ -198,6 +254,9 @@ pub struct Config {
     /// Input buffer for single-ended external channels. Differential
     /// conversions always run without it, as the datasheet recommends.
     pub buffer: bool,
+    /// Sampling time, for every channel.
+    #[cfg(adc_ch585)]
+    pub sample_time: SampleTime,
 }
 
 impl Default for Config {
@@ -206,12 +265,30 @@ impl Default for Config {
             clock: SampleClock::default(),
             gain: Gain::default(),
             buffer: true,
+            #[cfg(adc_ch585)]
+            sample_time: SampleTime::default(),
         }
     }
 }
 
 /// RAM the ADC DMA can reach: its address registers hold bits 14:1.
+#[cfg(adc_ch592)]
 const DMA_WINDOW: core::ops::Range<usize> = 0x2000_0000..0x2000_8000;
+/// RAM the ADC DMA can reach: its address registers hold bits 16:1, so all
+/// of it.
+#[cfg(adc_ch585)]
+const DMA_WINDOW: core::ops::Range<usize> = 0x2000_0000..0x2002_0000;
+/// `DMA_BEG`/`DMA_END`/`DMA_NOW` as written and read: byte addresses.
+#[cfg(adc_ch592)]
+type DmaAddr = u16;
+#[cfg(adc_ch585)]
+type DmaAddr = u32;
+const DMA_ADDR_MASK: usize = DMA_WINDOW.end - DMA_WINDOW.start - 2;
+
+/// `buf`'s address as the DMA address registers hold it.
+fn dma_addr(addr: usize) -> DmaAddr {
+    (addr & DMA_ADDR_MASK) as DmaAddr
+}
 
 /// ADC driver.
 pub struct Adc<'d, T: Instance, M: Mode = Blocking> {
@@ -253,7 +330,7 @@ impl<'d, T: Instance> Adc<'d, T, Async> {
         let gain2 = self.select(channel);
         let r = T::regs();
         r.convert().write(|w| {
-            w.set_pga_gain2(gain2);
+            *w = self.convert_reg(gain2);
             w.set_start(true);
         });
         // Starting cleared the end-of-conversion flags, so IE_EOC asserts the
@@ -337,7 +414,7 @@ impl<'d, T: Instance> Adc<'d, T, Async> {
             _adc: self,
             buf: buf.as_ptr(),
             len: buf.len(),
-            beg: buf.as_ptr() as u16,
+            beg: dma_addr(buf.as_ptr() as usize),
             pos: 0,
             lap: 0,
             _buf: PhantomData,
@@ -347,6 +424,10 @@ impl<'d, T: Instance> Adc<'d, T, Async> {
 
 impl<'d, T: Instance, M: Mode> Adc<'d, T, M> {
     fn new_inner(adc: Peri<'d, T>, config: Config) -> Self {
+        #[cfg(adc_ch585)]
+        if config.clock == SampleClock::Div2 && pac::SYS.clk_cfg().read().osc32m_sel() {
+            panic!("ADC clock over 8 MHz");
+        }
         pac::TOUCHKEY.cfg().modify(|w| w.set_pwr_on(false));
         let r = T::regs();
         r.ctrl_dma().write(|_| {});
@@ -390,7 +471,7 @@ impl<'d, T: Instance, M: Mode> Adc<'d, T, M> {
     /// [`Config::buffer`].
     pub fn convert(&mut self, channel: &mut impl AdcChannel<T>) -> u16 {
         let gain2 = self.select(channel);
-        Self::start_and_wait(gain2)
+        self.start_and_wait(gain2)
     }
 
     /// Fill `buf` with conversions of `channel` spaced by `pace`, the DMA
@@ -400,8 +481,9 @@ impl<'d, T: Instance, M: Mode> Adc<'d, T, M> {
     ///
     /// # Panics
     ///
-    /// If `buf` is empty or not in the first 32 KiB of RAM (all of RAM on
-    /// CH592), or `pace` is `Timed(n)` with `n` outside `1..=256`.
+    /// If `buf` is empty or not in RAM the DMA reaches (the first 32 KiB, all
+    /// of it on CH592, CH584 and CH585), or `pace` is `Timed(n)` with `n`
+    /// outside `1..=256`.
     pub fn blocking_read_dma(&mut self, channel: &mut impl AdcChannel<T>, buf: &mut [u16], pace: Pace) {
         self.select(channel);
         let r = T::regs();
@@ -439,7 +521,7 @@ impl<'d, T: Instance, M: Mode> Adc<'d, T, M> {
         pos.setup();
         neg.setup();
         let gain2 = self.front_end(p, self.config.gain, false, true);
-        Self::start_and_wait(gain2)
+        self.start_and_wait(gain2)
     }
 
     fn front_end(&mut self, ch: u8, gain: Gain, buffer: bool, diff: bool) -> bool {
@@ -459,16 +541,26 @@ impl<'d, T: Instance, M: Mode> Adc<'d, T, M> {
             self.last = Some((cfg.0, ch));
             r.channel().write(|w| w.set_ch_inx(ch));
             r.cfg().write_value(cfg);
-            r.convert().write(|w| w.set_pga_gain2(gain2));
-            Self::start_and_wait(gain2);
+            r.convert().write_value(self.convert_reg(gain2));
+            self.start_and_wait(gain2);
         }
         gain2
     }
 
-    fn start_and_wait(gain2: bool) -> u16 {
+    /// `R8_ADC_CONVERT` with `RB_ADC_PGA_GAIN2` set to `gain2` (and the
+    /// sample time on CH584/CH585), not started.
+    fn convert_reg(&self, gain2: bool) -> pac::adc::regs::Convert {
+        let mut v = pac::adc::regs::Convert(0);
+        v.set_pga_gain2(gain2);
+        #[cfg(adc_ch585)]
+        v.set_sample_time(self.config.sample_time as u8);
+        v
+    }
+
+    fn start_and_wait(&self, gain2: bool) -> u16 {
         let r = T::regs();
         r.convert().write(|w| {
-            w.set_pga_gain2(gain2);
+            *w = self.convert_reg(gain2);
             w.set_start(true);
         });
         while r.convert().read().start() {}
@@ -489,10 +581,10 @@ impl<'d, T: Instance, M: Mode> Adc<'d, T, M> {
             w.set_diff_en(false);
         });
         // In test mode the result comes out inverted.
-        Self::start_and_wait(gain2);
+        self.start_and_wait(gain2);
         let mut sum = 0u32;
         for _ in 0..16 {
-            sum += (!Self::start_and_wait(gain2) & ADC_MAX as u16) as u32;
+            sum += (!self.start_and_wait(gain2) & ADC_MAX as u16) as u32;
         }
         r.cfg().write_value(cfg);
         self.last = None;
@@ -531,7 +623,7 @@ fn start_dma(r: pac::adc::Adc, buf: &mut [u16], pace: Pace, ring: bool) {
     let start = buf.as_mut_ptr() as usize;
     let end = start + 2 * buf.len();
     if buf.is_empty() || !DMA_WINDOW.contains(&start) || end >= DMA_WINDOW.end {
-        panic!("ADC DMA buffer must be in the first 32 KiB of RAM");
+        panic!("ADC DMA buffer must be in RAM the ADC DMA reaches");
     }
     let cycle = match pace {
         Pace::Continuous => 0,
@@ -544,9 +636,9 @@ fn start_dma(r: pac::adc::Adc, buf: &mut [u16], pace: Pace, ring: bool) {
         w.set_if_end(true);
     });
     r.auto_cycle().write(|w| w.set_auto_cycle(cycle));
-    // The address fields hold bits 14:1: write byte addresses whole.
-    r.dma_beg().write(|w| w.0 = start as u16);
-    r.dma_end().write(|w| w.0 = end as u16);
+    // The address fields hold bits 14:1 (16:1): write byte addresses whole.
+    r.dma_beg().write(|w| w.0 = dma_addr(start));
+    r.dma_end().write(|w| w.0 = dma_addr(end));
     compiler_fence(Ordering::SeqCst);
     r.ctrl_dma().write(|w| {
         w.set_dma_enable(true);
@@ -582,8 +674,8 @@ pub struct RingBufferedAdc<'a, 'd, T: Instance> {
     _adc: &'a mut Adc<'d, T, Async>,
     buf: *const u16,
     len: usize,
-    /// `DMA_BEG`, the low half of `buf`'s address.
-    beg: u16,
+    /// `DMA_BEG`, `buf`'s address as the DMA holds it.
+    beg: DmaAddr,
     /// Next index to read.
     pos: usize,
     /// Laps the DMA is ahead of the reader's lap: 0 or 1 unless overrun.
@@ -680,7 +772,7 @@ fn unmask<T: Instance>() {
 
 /// DMA laps since the last call and the index it writes next, read
 /// consistently.
-fn position<T: Instance>(beg: u16) -> (u32, usize) {
+fn position<T: Instance>(beg: DmaAddr) -> (u32, usize) {
     let r = T::regs();
     critical_section::with(|_| loop {
         // DMA_NOW and the flag change together at the wrap: read the flag on
@@ -878,7 +970,17 @@ impl_adc_pin!(ADC, PA12, 2);
 impl_adc_pin!(ADC, PA13, 3);
 impl_adc_pin!(ADC, PA14, 4);
 impl_adc_pin!(ADC, PA15, 5);
+#[cfg(adc_ch585)]
+impl_adc_pin!(ADC, PA3, 6);
+#[cfg(adc_ch585)]
+impl_adc_pin!(ADC, PA2, 7);
+#[cfg(adc_ch585)]
+impl_adc_pin!(ADC, PA1, 8);
+#[cfg(adc_ch585)]
+impl_adc_pin!(ADC, PA0, 9);
+#[cfg(adc_ch592)]
 impl_adc_pin!(ADC, PB0, 8);
+#[cfg(adc_ch592)]
 impl_adc_pin!(ADC, PB6, 9);
 impl_adc_pin!(ADC, PA6, 10);
 impl_adc_pin!(ADC, PA7, 11);

@@ -103,7 +103,7 @@ pub use crate::_generated::{peripherals, Peripherals};
 
 pub(crate) mod sys;
 
-#[cfg(ch592)]
+#[cfg(any(adc_ch592, adc_ch585))]
 pub mod adc;
 
 #[cfg(feature = "embassy")]
