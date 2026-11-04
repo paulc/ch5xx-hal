@@ -168,7 +168,26 @@ pub fn init(config: Config) -> Peripherals {
         exti::init(cs);
     });
 
+    #[cfg(all(feature = "rt", any(ch584, ch585)))]
+    unsafe {
+        enable_interrupts_v3c()
+    };
+
     p
+}
+
+/// Turn interrupts on, which qingke-rt 0.8 fails to do on QingKe V3C.
+///
+/// qingke-rt reaches `main` through `mret` with `mstatus.MPIE` set, so `MIE`
+/// should come up set. But the last step of its `_setup_interrupts` takes a
+/// critical section (`wfi_to_wfe`), and on V3C that is `csrrc 0x800, 0x88`,
+/// which clears `MPIE` as well, and is only undone if `MIE` was set: it was
+/// not, so `main` starts with interrupts off (`mstatus` 0x1800, checked on a
+/// CH584). qingke-rt's V4 path calls `gintenr::set_enable()` first; the V3C
+/// path does not.
+#[cfg(all(feature = "rt", any(ch584, ch585)))]
+unsafe fn enable_interrupts_v3c() {
+    unsafe { qingke::register::gintenr::set_enable() };
 }
 
 /// Let a pending interrupt end a `wfi` even while interrupts are masked.
