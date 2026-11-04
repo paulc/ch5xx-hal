@@ -1,0 +1,12 @@
+[build]
+# Not riscv32imac: the QingKe V3C core has no A extension, and the first
+# atomic instruction traps.
+target = "riscv32imc-unknown-none-elf"
+
+[target.riscv32imc-unknown-none-elf]
+# probe-rs has no CH58x target yet, so flash with wlink. wlink reports the
+# CH584 as a CH585 (same die, same debug module).
+runner = "wlink --chip CH585 flash"
+
+[unstable]
+build-std = ["core"]

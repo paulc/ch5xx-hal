@@ -7,13 +7,14 @@
 //! - 0xFFE2 "Counter": read/notify, u32 LE, incremented and notified every
 //!   second while a client has notifications enabled (paused otherwise)
 //!
-//! The characteristic callbacks run inside TMOS (in the `ble` task): they
-//! only update state and signal the main task, which logs over SDI print.
-//! The counter has its own task, which notifies every subscribed connection
+//! The characteristic callbacks run inside TMOS: they only update state and
+//! signal the main task, which logs on UART0 TX (PB7, 115200 8N1). The
+//! counter has its own task, which notifies every subscribed connection
 //! (`notify_all`) without tracking connections itself.
 //!
-//! Build with `--features ble`. Connect with a BLE app (e.g. nRF Connect)
-//! to "ch584-peripheral".
+//! The HAL's executor runs TMOS and sleeps between radio events, as in
+//! `ble_adv`. Connect with a BLE app (e.g. nRF Connect) to
+//! "ch584-peripheral".
 //!
 //! hw-test: manual. It needs a BLE central.
 
@@ -35,7 +36,9 @@ use hal::ble::gatt::*;
 use hal::ble::gatt_server::{self, Characteristic, Service, Uuid};
 use hal::ble::peripheral::{self, AdvData, Event};
 use hal::ble::{self, MacAddress};
-use hal::println;
+use hal::mode::Blocking;
+use hal::peripherals::UART0;
+use hal::uart::{self, UartTx};
 use panic_halt as _;
 
 const SHORT_NAME: &str = "ch584-per";
@@ -72,6 +75,24 @@ static COUNTER: AtomicU32 = AtomicU32::new(0);
 static DATA_WRITTEN: Signal<CriticalSectionRawMutex, Data> = Signal::new();
 static SUBSCRIBED: Signal<CriticalSectionRawMutex, bool> = Signal::new();
 
+/// The log, shared by the tasks.
+static LOG: Mutex<CriticalSectionRawMutex, RefCell<Option<UartTx<'static, UART0, Blocking>>>> =
+    Mutex::new(RefCell::new(None));
+
+/// Log a line. It is sent before this returns: the UART clock stops in
+/// sleep.
+macro_rules! log {
+    ($($t:tt)*) => {
+        LOG.lock(|tx| {
+            if let Some(tx) = tx.borrow_mut().as_mut() {
+                let _ = core::fmt::Write::write_fmt(tx, format_args!($($t)*));
+                let _ = tx.blocking_write(b"\r\n");
+                let _ = tx.blocking_flush();
+            }
+        })
+    };
+}
+
 /* GATT service */
 
 static DATA_CHAR: Characteristic = Characteristic::new(Uuid::u16(0xFFE1), GATT_PROP_READ | GATT_PROP_WRITE)
@@ -107,11 +128,6 @@ static COUNTER_CHAR: Characteristic = Characteristic::new(Uuid::u16(0xFFE2), GAT
 
 static SERVICE: Service = Service::new(Uuid::u16(SERVICE_UUID), &[&DATA_CHAR, &COUNTER_CHAR]);
 
-#[embassy_executor::task]
-async fn ble_task() -> ! {
-    ble::run().await
-}
-
 /// Increment the counter every second while a client is subscribed, and
 /// notify all subscribers.
 #[embassy_executor::task]
@@ -119,7 +135,7 @@ async fn counter_task() -> ! {
     loop {
         // Pause while nobody is listening.
         if let Err(e) = gatt_server::wait_subscribed(&COUNTER_CHAR).await {
-            println!("wait_subscribed: {:?}", e);
+            log!("wait_subscribed: {:?}", e);
             loop {}
         }
         Timer::after_secs(1).await;
@@ -130,7 +146,7 @@ async fn counter_task() -> ! {
         let counter = COUNTER.load(Ordering::Relaxed).wrapping_add(1);
         COUNTER.store(counter, Ordering::Relaxed);
         if let Err(e) = gatt_server::notify_all(&COUNTER_CHAR, &counter.to_le_bytes()) {
-            println!("notify failed: {:?}", e);
+            log!("notify failed: {:?}", e);
         }
     }
 }
@@ -139,25 +155,28 @@ async fn counter_task() -> ! {
 async fn stats_task() -> ! {
     loop {
         Timer::after_secs(10).await;
-        println!("{}", ble::STATS);
+        log!("{}", ble::STATS);
     }
 }
 
-#[embassy_executor::main(entry = "qingke_rt::entry")]
+#[embassy_executor::main(entry = "qingke_rt::entry", executor = "ch5xx_hal::embassy::Executor")]
 async fn main(spawner: Spawner) -> ! {
-    hal::debug::SDIPrint::enable();
     let p = hal::init(hal::Config {
         rcc: hal::rcc::Config::SYSCLK_FREQ_62_4MHZ,
         ..Default::default()
     });
-    println!("BLE peripheral, {}", ble::lib_version());
+    let tx = UartTx::new_blocking::<0>(p.UART0, p.PB7, uart::Config::default()).unwrap();
+    LOG.lock(|log| *log.borrow_mut() = Some(tx));
+    log!("BLE peripheral, {}", ble::lib_version());
+    // A chance for a debugger to connect before the chip starts sleeping.
+    Timer::after_secs(2).await;
 
     // A random address, so a scanner does not show a cached name.
     let mut config = ble::Config::default();
     config.mac_addr = MacAddress::random();
-    println!("MAC {}", config.mac_addr);
+    log!("MAC {}", config.mac_addr);
     if let Err(e) = ble::init(p.RTC, config) {
-        println!("ble::init: {:?}", e);
+        log!("ble::init: {:?}", e);
         loop {}
     }
 
@@ -168,12 +187,11 @@ async fn main(spawner: Spawner) -> ! {
     let scan_rsp = AdvData::new().name(DEVICE_NAME).conn_interval_range(6, 100);
     let peripheral_config = peripheral::Config::new(DEVICE_NAME, &adv, &scan_rsp);
     if let Err(e) = peripheral::start(&peripheral_config, &[&SERVICE]) {
-        println!("peripheral::start: {:?}", e);
+        log!("peripheral::start: {:?}", e);
         loop {}
     }
-    println!("advertising");
+    log!("advertising");
 
-    spawner.spawn(ble_task().unwrap());
     spawner.spawn(counter_task().unwrap());
     spawner.spawn(stats_task().unwrap());
 
@@ -181,22 +199,24 @@ async fn main(spawner: Spawner) -> ! {
         match select3(peripheral::next_event(), DATA_WRITTEN.wait(), SUBSCRIBED.wait()).await {
             Either3::First(event) => match event {
                 Event::Connected { handle, interval, peer } => {
-                    println!(
+                    log!(
                         "connected: handle {:#x}, interval {} x 1.25 ms, peer {}",
-                        handle, interval, peer
+                        handle,
+                        interval,
+                        peer
                     );
                 }
                 Event::Disconnected { handle, reason } => {
-                    println!("disconnected: handle {:#x}, reason {:#x}", handle, reason);
+                    log!("disconnected: handle {:#x}, reason {:#x}", handle, reason);
                 }
                 Event::ParamUpdate { handle, interval, .. } => {
-                    println!("param update: handle {:#x}, interval {} x 1.25 ms", handle, interval);
+                    log!("param update: handle {:#x}, interval {} x 1.25 ms", handle, interval);
                 }
-                Event::Mtu { mtu, .. } => println!("MTU {}", mtu),
-                Event::ScanRequest { peer } => println!("scan request from {}", peer),
+                Event::Mtu { mtu, .. } => log!("MTU {}", mtu),
+                Event::ScanRequest { peer } => log!("scan request from {}", peer),
             },
-            Either3::Second(data) => println!("data written: {:02x?}", data.as_slice()),
-            Either3::Third(enabled) => println!("counter notifications {}", if enabled { "on" } else { "off" }),
+            Either3::Second(data) => log!("data written: {:02x?}", data.as_slice()),
+            Either3::Third(enabled) => log!("counter notifications {}", if enabled { "on" } else { "off" }),
         }
     }
 }
