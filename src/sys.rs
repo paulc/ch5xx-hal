@@ -35,8 +35,9 @@ pub(crate) fn safe_access<R>(f: impl FnOnce() -> R) -> R {
     })
 }
 
-/// Peripheral clock gates (`R8_SLP_CLK_OFF0/1`, 1 = clock off). All are on
-/// after reset; drivers turn theirs back on in case the application gated it.
+/// Peripheral clock gates (`R8_SLP_CLK_OFF0/1`, and `R8_SAFE_CLK_CTRL` on
+/// CH584/CH585; 1 = clock off). All are on after reset; drivers turn theirs
+/// back on in case the application gated it.
 #[cfg(any(sys_ch592, sys_ch585))]
 #[allow(unused)]
 #[derive(Clone, Copy)]
@@ -54,6 +55,8 @@ pub(crate) enum ClockGate {
     I2c,
     Usb,
     Lcd,
+    #[cfg(sys_ch585)]
+    Led,
 }
 
 #[cfg(any(sys_ch592, sys_ch585))]
@@ -74,6 +77,8 @@ pub(crate) fn set_clock_enabled(gate: ClockGate, on: bool) {
         ClockGate::I2c => pac::SYS.slp_clk_off1().modify(|w| w.set_slp_clk_i2c(off)),
         ClockGate::Usb => pac::SYS.slp_clk_off1().modify(|w| w.set_slp_clk_usb(off)),
         ClockGate::Lcd => pac::SYS.slp_clk_off1().modify(|w| w.set_slp_clk_lcd(off)),
+        #[cfg(sys_ch585)]
+        ClockGate::Led => pac::SYS.safe_clk_ctrl().modify(|w| w.set_clk_off_led(off)),
     })
 }
 
