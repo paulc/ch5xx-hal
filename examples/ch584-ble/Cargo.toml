@@ -21,9 +21,11 @@ qingke = "0.8.3"
 qingke-rt = "0.8.3"
 
 [features]
-## `ble_adv`: advertise every second (not every 100 ms).
+## `ble_adv`, `ble_peripheral`: advertise every second (not every 100 ms /
+## 50 ms).
 adv-1s = []
-## `ble_adv`: no UART log (PB7 gets a pull-up like the other spare pins).
+## `ble_adv`, `ble_peripheral`: no UART log (PB7 gets a pull-up like the
+## other spare pins).
 quiet = []
 
 [profile.release]

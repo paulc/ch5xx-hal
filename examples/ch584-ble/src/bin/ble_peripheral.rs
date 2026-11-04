@@ -12,9 +12,17 @@
 //! counter has its own task, which notifies every subscribed connection
 //! (`notify_all`) without tracking connections itself.
 //!
-//! The HAL's executor runs TMOS and sleeps between radio events, and the
-//! spare pins and the debug interface are set up for low current, as in
-//! `ble_adv` (power-cycle the board and flash at once). Connect with a BLE app (e.g. nRF Connect) to
+//! Low power: the HAL's executor runs TMOS and sleeps between radio
+//! events, and the spare pins and the debug interface are set up for low
+//! current, as in `ble_adv` (power-cycle the board and flash at once).
+//! Advertising is every 50 ms (the EVT's, for a quick connection), or 1 s
+//! with feature `adv-1s`; `quiet` drops the log. On a CH584F, 50 ms costs
+//! about 0.46 mA. Once connected, it waits 6 s for the central to discover
+//! the service at its own interval (macOS picks 15-30 ms), then asks for a
+//! 100-200 ms interval with a latency of 4 (`request_conn_params`), so a
+//! quiet link costs a connection event or so a second.
+//!
+//! Connect with a BLE app (e.g. nRF Connect, `blescan`) to
 //! "ch584-peripheral".
 //!
 //! hw-test: manual. It needs a BLE central.
@@ -39,8 +47,11 @@ use hal::ble::peripheral::{self, AdvData, Event};
 use hal::ble::{self, MacAddress};
 use hal::debug::set_debug_interface_enabled;
 use hal::gpio::{Input, Pull};
+#[cfg(not(feature = "quiet"))]
 use hal::mode::Blocking;
+#[cfg(not(feature = "quiet"))]
 use hal::peripherals::UART0;
+#[cfg(not(feature = "quiet"))]
 use hal::uart::{self, UartTx};
 use panic_halt as _;
 
@@ -48,6 +59,21 @@ const SHORT_NAME: &str = "ch584-per";
 const DEVICE_NAME: &str = "ch584-peripheral";
 const SERVICE_UUID: u16 = 0xFFE0;
 const DATA_MAX_LEN: usize = 20;
+/// Advertising interval in 0.625 ms units: 50 ms, or 1 s with `adv-1s`.
+#[cfg(not(feature = "adv-1s"))]
+const ADVERTISING_INTERVAL: u16 = 80;
+#[cfg(feature = "adv-1s")]
+const ADVERTISING_INTERVAL: u16 = 1600;
+
+/// Connection parameters asked for once the central has had time to
+/// discover the service (`request_conn_params`): 100-200 ms interval
+/// (1.25 ms units), up to 4 events skipped, 6 s supervision timeout
+/// (10 ms units).
+const CONN_PARAMS_DELAY_SECS: u64 = 6;
+const CONN_INTERVAL_MIN: u16 = 80;
+const CONN_INTERVAL_MAX: u16 = 160;
+const CONN_LATENCY: u16 = 4;
+const CONN_TIMEOUT: u16 = 600;
 
 /// A value of up to `DATA_MAX_LEN` bytes.
 #[derive(Clone, Copy)]
@@ -77,13 +103,17 @@ static COUNTER: AtomicU32 = AtomicU32::new(0);
 /// Signals from the GATT callbacks to the main task
 static DATA_WRITTEN: Signal<CriticalSectionRawMutex, Data> = Signal::new();
 static SUBSCRIBED: Signal<CriticalSectionRawMutex, bool> = Signal::new();
+/// From the main task to `conn_params_task`: a connection's handle.
+static CONNECTED: Signal<CriticalSectionRawMutex, u16> = Signal::new();
 
 /// The log, shared by the tasks.
+#[cfg(not(feature = "quiet"))]
 static LOG: Mutex<CriticalSectionRawMutex, RefCell<Option<UartTx<'static, UART0, Blocking>>>> =
     Mutex::new(RefCell::new(None));
 
 /// Log a line. It is sent before this returns: the UART clock stops in
 /// sleep.
+#[cfg(not(feature = "quiet"))]
 macro_rules! log {
     ($($t:tt)*) => {
         LOG.lock(|tx| {
@@ -94,6 +124,14 @@ macro_rules! log {
             }
         })
     };
+}
+
+/// With `quiet`, no log (it keeps the chip awake about 9 ms a line).
+#[cfg(feature = "quiet")]
+macro_rules! log {
+    ($($t:tt)*) => {{
+        let _ = |f: &mut dyn core::fmt::Write| f.write_fmt(format_args!($($t)*));
+    }};
 }
 
 /* GATT service */
@@ -154,6 +192,21 @@ async fn counter_task() -> ! {
     }
 }
 
+/// Ask each new connection for longer connection parameters, after a delay.
+#[embassy_executor::task]
+async fn conn_params_task() -> ! {
+    loop {
+        let handle = CONNECTED.wait().await;
+        Timer::after_secs(CONN_PARAMS_DELAY_SECS).await;
+        // Fails harmlessly if the link has gone meanwhile.
+        if let Err(e) =
+            peripheral::request_conn_params(handle, CONN_INTERVAL_MIN, CONN_INTERVAL_MAX, CONN_LATENCY, CONN_TIMEOUT)
+        {
+            log!("request_conn_params: {:?}", e);
+        }
+    }
+}
+
 #[embassy_executor::task]
 async fn stats_task() -> ! {
     loop {
@@ -168,8 +221,13 @@ async fn main(spawner: Spawner) -> ! {
         rcc: hal::rcc::Config::SYSCLK_FREQ_62_4MHZ,
         ..Default::default()
     });
-    let tx = UartTx::new_blocking::<0>(p.UART0, p.PB7, uart::Config::default()).unwrap();
-    LOG.lock(|log| *log.borrow_mut() = Some(tx));
+    #[cfg(not(feature = "quiet"))]
+    {
+        let tx = UartTx::new_blocking::<0>(p.UART0, p.PB7, uart::Config::default()).unwrap();
+        LOG.lock(|log| *log.borrow_mut() = Some(tx));
+    }
+    #[cfg(feature = "quiet")]
+    let _ = Input::new(p.PB7, Pull::Up);
     // Spare pins get a pull-up: floating inputs draw current in sleep.
     // Input drivers have no drop, so the pulls stay. Not PB7 (the log) or
     // PA10/PA11 (the 32 kHz crystal).
@@ -199,7 +257,8 @@ async fn main(spawner: Spawner) -> ! {
         .uuid16_list(&[SERVICE_UUID])
         .short_name(SHORT_NAME);
     let scan_rsp = AdvData::new().name(DEVICE_NAME).conn_interval_range(6, 100);
-    let peripheral_config = peripheral::Config::new(DEVICE_NAME, &adv, &scan_rsp);
+    let mut peripheral_config = peripheral::Config::new(DEVICE_NAME, &adv, &scan_rsp);
+    peripheral_config.adv_interval = ADVERTISING_INTERVAL;
     if let Err(e) = peripheral::start(&peripheral_config, &[&SERVICE]) {
         log!("peripheral::start: {:?}", e);
         loop {}
@@ -207,6 +266,8 @@ async fn main(spawner: Spawner) -> ! {
     log!("advertising");
 
     spawner.spawn(counter_task().unwrap());
+    spawner.spawn(conn_params_task().unwrap());
+    #[cfg(not(feature = "quiet"))]
     spawner.spawn(stats_task().unwrap());
 
     loop {
@@ -219,12 +280,24 @@ async fn main(spawner: Spawner) -> ! {
                         interval,
                         peer
                     );
+                    CONNECTED.signal(handle);
                 }
                 Event::Disconnected { handle, reason } => {
                     log!("disconnected: handle {:#x}, reason {:#x}", handle, reason);
                 }
-                Event::ParamUpdate { handle, interval, .. } => {
-                    log!("param update: handle {:#x}, interval {} x 1.25 ms", handle, interval);
+                Event::ParamUpdate {
+                    handle,
+                    interval,
+                    latency,
+                    timeout,
+                } => {
+                    log!(
+                        "param update: handle {:#x}, interval {} x 1.25 ms, latency {}, timeout {} x 10 ms",
+                        handle,
+                        interval,
+                        latency,
+                        timeout
+                    );
                 }
                 Event::Mtu { mtu, .. } => log!("MTU {}", mtu),
                 Event::ScanRequest { peer } => log!("scan request from {}", peer),

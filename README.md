@@ -111,7 +111,7 @@ board by the test examples in `examples/ch592` and `examples/ch584`.
 | `soft_i2c` | bit-bang I2C master on any two pins, clocked by TMR0-3, blocking and async, `embedded-hal(-async)`; up to 100 kHz with feature `highcode` | yes (waveform, stretching, errors; devices not yet) | yes (as CH592) |
 | `usb` | full-speed device for `embassy-usb` (`USBFS` on CH584/CH585) | yes (CDC-ACM echo; stall and remote wakeup untested) | enumerates (echo untested) |
 | `ledc` | LED screen controller (CH584/CH585): clock plus 1/2/4/8 data lanes, blocking (FIFO) and async (DMA) | - | yes (clock and lane 4, the only data pin the CH584F bonds; WCH supports the block on QFN48 parts only) |
-| `ble` | WCH's BLE library (vendored): FFI bindings (TMOS, GAP, GATT), init, a GATT server and peripheral helpers, advertising data builder; with `embassy::Executor`, sleep between BLE events (features `ble`, `executor`) | builds; not yet run | advertising, sleeping between events (`ble_sleep`); `ble_peripheral` connected from macOS (`blescan`): discovery, read, write, notify |
+| `ble` | WCH's BLE library (vendored): FFI bindings (TMOS, GAP, GATT), init, a GATT server and peripheral helpers (connection parameter requests), advertising data builder; with `embassy::Executor`, sleep between BLE events (features `ble`, `executor`) | builds; not yet run | advertising, sleeping between events (`ble_sleep`), 9 uA between events; `ble_peripheral` connected from macOS (`blescan`): discovery, read, write, notify (connection parameter request untested) |
 | `pwr` | DC-DC converter; idle, halt, sleep and shutdown modes with GPIO/RTC/USB/battery wake-up; battery voltage monitor; reset reason | not yet (`pwr` example) | yes (`pwr`, `sleep_current` examples) |
 
 Not implemented: timer PWM DMA, and on CH584/CH585 USBHS, SPI1, LCD and
@@ -161,10 +161,14 @@ sleep:
 - `ble_adv`: scannable advertiser ("ch584-advertiser") with the counters
   and embassy time against the RTC every 5 s. For a current reading,
   `--features adv-1s,quiet` advertises every second with no log: on the
-  CH584F (spare pins pulled up, debug off) the floor is about 9 uA.
+  CH584F (spare pins pulled up, debug off) the floor is about 9 uA, as in
+  `sleep_current`. The chip is awake about 1.2 ms per advertising event.
 - `ble_peripheral`: connectable peripheral ("ch584-peripheral") with a GATT
   service (0xFFE0: read/write data, notifying counter), using the
-  `gatt_server` and `peripheral` helpers.
+  `gatt_server` and `peripheral` helpers. It advertises every 50 ms (about
+  0.46 mA on the CH584F), and 6 s after a connection asks the central for a
+  100-200 ms interval with a latency of 4. The same `adv-1s` and `quiet`
+  features apply.
 - `ble_sleep`: a test: advertises for 20 s while sleeping, timing embassy
   timers against the RTC, then checks the sleep count, advertising, embassy
   time drift and timer accuracy. It reports on the UART and leaves its
