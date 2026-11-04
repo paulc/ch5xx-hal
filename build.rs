@@ -41,13 +41,28 @@ fn main() {
     };
     println!("cargo:rustc-cfg={chip_name}");
 
+    // One cfg per register block version, e.g. `adc_ch592`, `sys_ch585`, as
+    // embassy-stm32 does (`adc_v3`): drivers gate on the block they program,
+    // not the chip, so chips sharing a block share the code. CH584 and CH585
+    // are one die and use the same blocks, for example.
+    let mut block_cfgs = BTreeSet::new();
+    for p in METADATA.peripherals {
+        if let Some(r) = &p.registers {
+            block_cfgs.insert(format!("{}_{}", r.kind, r.version));
+        }
+    }
+    for cfg in &block_cfgs {
+        println!("cargo:rustc-cfg={cfg}");
+    }
+
     // Per-chip bonded GPIO pins. The metadata does not carry pins yet (see
     // ch5xx-data AGENTS.md, "Pins ... are not in the SVD; leave them for hand
     // editing"), and the bonded set differs per die, so it lives here until
     // pins land in the data. Only listed pins get a singleton; for chips sold
     // in several packages, list the largest package.
     let ports: &[(char, &[u8])] = match chip_name.as_str() {
-        "ch585" => &[
+        // CH585M / CH584M (QFN48). CH585F / CH584F (QFN32) bond a subset.
+        "ch584" | "ch585" => &[
             ('A', &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]),
             (
                 'B',
@@ -87,7 +102,7 @@ fn main() {
     // Blocks without a peripheral entry of their own in the metadata, which
     // drivers still take as a singleton: the independent watchdog is two
     // registers at the start of `SYS`.
-    if chip_name == "ch592" {
+    if block_cfgs.contains("sys_ch592") || block_cfgs.contains("sys_ch585") {
         singletons.push("IWDG".to_string());
     }
 

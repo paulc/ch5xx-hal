@@ -25,7 +25,7 @@
 //!
 //! # Features
 //!
-//! - `ch585` / `ch592`: the chip (exactly one).
+//! - `ch584` / `ch585` / `ch592`: the chip (exactly one).
 //! - `rt` (default): `qingke-rt` runtime and interrupt vectors.
 //! - `embassy`: the `embassy-time` driver on SysTick (CH592).
 //! - `exti`: built-in GPIO interrupt handlers for `exti::ExtiInput` (CH592).
