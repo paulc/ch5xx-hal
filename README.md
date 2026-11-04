@@ -101,9 +101,10 @@ board by the test examples in `examples/ch592` and `examples/ch584`.
 | `i2c` | I2C0 master, blocking and async, `embedded-hal(-async)`; on CH592 on PB15/PB14, so it turns the debug interface off | yes (bus scan) | yes (no device: NACKs, stuck-line errors and recovery) |
 | `soft_i2c` | bit-bang I2C master on any two pins, clocked by TMR0-3, blocking and async, `embedded-hal(-async)`; up to 100 kHz with feature `highcode` | yes (waveform, stretching, errors; devices not yet) | yes (as CH592) |
 | `usb` | full-speed device for `embassy-usb` (`USBFS` on CH584/CH585) | yes (CDC-ACM echo; stall and remote wakeup untested) | enumerates (echo untested) |
+| `ledc` | LED screen controller (CH584/CH585): clock plus 1/2/4/8 data lanes, blocking (FIFO) and async (DMA) | - | yes (clock and lane 4, the only data pin the CH584F bonds) |
 
 Not implemented: BLE, low-power modes, timer PWM DMA, and on CH584/CH585
-USBHS, SPI1, LCD, LED and touch-key.
+USBHS, SPI1, LCD and touch-key.
 
 ## What differs from CH32
 
@@ -131,7 +132,7 @@ The CH5xx register model is not a CH32 one, so a few things look different:
 ## Examples
 
 `examples/ch584` targets the WeAct CH584F core board (LED on PB6) and holds
-the same hardware tests as `examples/ch592`, plus `i2c`; build them for
+the same hardware tests as `examples/ch592`, plus `i2c` and `ledc`; build them for
 `riscv32imc` (the default there), since V3C has no A extension and the
 first atomic instruction of an `imac` build traps. The runner is
 `wlink --chip CH585 flash`: wlink reports a CH584 as a CH585. They need the
