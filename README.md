@@ -83,7 +83,8 @@ Add `--open` to open the result in a browser, or serve the `doc` directory
 
 All chips:
 
-- `init()`: clock/frequency setup and GPIO bring-up
+- `init()`: clock/frequency setup and GPIO bring-up (the pads the package does
+  not bond out get a pull-up, as floating they draw current in sleep)
 - `gpio`: input, output, flex pins, internal pull up/down, drive strength
 - `delay`: `embedded-hal` `DelayNs`, backed by the core SysTick
 - `rcc`: system clock: HSE, HSI (CH584/CH585) or PLL
@@ -112,7 +113,7 @@ board by the test examples in `examples/ch592` and `examples/ch584`.
 | `ledc` | LED screen controller (CH584/CH585): clock plus 1/2/4/8 data lanes, blocking (FIFO) and async (DMA) | - | yes (clock and lane 4, the only data pin the CH584F bonds; WCH supports the block on QFN48 parts only) |
 | `pwr` | DC-DC converter; idle, halt, sleep and shutdown modes with GPIO/RTC/USB/battery wake-up; battery voltage monitor; reset reason | not yet (`pwr` example) | yes (`pwr`, `sleep_current` examples) |
 
-Not implemented: BLE, low-power modes, timer PWM DMA, and on CH584/CH585
+Not implemented: BLE, timer PWM DMA, and on CH584/CH585
 USBHS, SPI1, LCD and touch-key.
 
 ## What differs from CH32
@@ -204,6 +205,24 @@ queue for good. Without A, embassy and the HAL (through `portable-atomic`)
 make atomic read-modify-writes in a critical section. `wake_race` checks this;
 built with `--target riscv32imac-unknown-none-elf` it fails. Applications on
 CH592 should use `riscv32imc` too.
+
+### Test bench
+
+The hardware tests run on WeAct core boards (a CH584F now, a CH592F
+before) wired to a WCH-LinkE:
+
+| Connection | What for |
+|------------|----------|
+| LinkE SWDIO - PB14 (TIO), SWCLK - PB15 (TCK), GND | flashing and SDI print (`CFG_DEBUG_EN` set in the user config) |
+| LinkE 5V - board 5V pin | power; from the LinkE's 3.3 V instead, the board's regulator (ME6231) is back-fed and draws about 0.55 mA, which spoils current readings |
+| PA14 - PA15 jumper | loopback for `spi`, `soft_i2c` and `uart_async` |
+| PB7 (UART0 TX) - LinkE RX | serial log for the tests that cannot use SDI print (`pwr`, `sleep_current`), 115200 8N1 on the LinkE's serial port |
+
+The board's USB port goes to the host (`usb_cdc`; it is also why PB10/PB11
+read low). For current readings, a meter goes in series with the 5 V supply.
+The LinkE can switch that supply (`wlink set-power disable5v` /
+`enable5v`), which is how a chip stuck in a low-power mode is recovered:
+power-cycle it and flash at once.
 
 ### Running the hardware tests
 
