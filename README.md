@@ -110,7 +110,7 @@ board by the test examples in `examples/ch592` and `examples/ch584`.
 | `soft_i2c` | bit-bang I2C master on any two pins, clocked by TMR0-3, blocking and async, `embedded-hal(-async)`; up to 100 kHz with feature `highcode` | yes (waveform, stretching, errors; devices not yet) | yes (as CH592) |
 | `usb` | full-speed device for `embassy-usb` (`USBFS` on CH584/CH585) | yes (CDC-ACM echo; stall and remote wakeup untested) | enumerates (echo untested) |
 | `ledc` | LED screen controller (CH584/CH585): clock plus 1/2/4/8 data lanes, blocking (FIFO) and async (DMA) | - | yes (clock and lane 4, the only data pin the CH584F bonds; WCH supports the block on QFN48 parts only) |
-| `pwr` | DC-DC converter; idle, halt, sleep and shutdown modes with GPIO/RTC/USB/battery wake-up; battery voltage monitor; reset reason | not yet (`pwr` example) | modes, RTC and GPIO wake-up, battery monitor, reset reason (not yet: DC-DC) |
+| `pwr` | DC-DC converter; idle, halt, sleep and shutdown modes with GPIO/RTC/USB/battery wake-up; battery voltage monitor; reset reason | not yet (`pwr` example) | yes (`pwr`, `sleep_current` examples) |
 
 Not implemented: BLE, low-power modes, timer PWM DMA, and on CH584/CH585
 USBHS, SPI1, LCD and touch-key.
@@ -231,6 +231,10 @@ instead: wire PB7 to WCH-LinkE RX and read the LinkE's serial port. Without
 `--enable-sdi-print`, `wlink flash --watch-serial` leaves the core halted
 (wlink only releases it when it detaches), so flash with plain `wlink flash`
 and open the port with a serial terminal; the test waits 2 s before printing.
+`sleep_current` (also manual) pulls up the spare pins and steps through
+halt, sleep and shutdown for 10 s each, for a supply current meter. The
+debugger cannot attach while the chip halts or sleeps: to flash it again,
+power-cycle the board and flash during the 2 s pause after the reset.
 
 The examples enable the HAL's `highcode` feature, which runs interrupt entry
 and the functions placed in `.highcode` from RAM: CH592 flash runs code
