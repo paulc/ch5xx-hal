@@ -4,13 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ch5xx-hal = { path = "../../", features = ["ch592f", "rt", "memory-x", "time-driver-systick"] }
+ch5xx-hal = { path = "../../", features = ["ch592f", "rt", "memory-x", "time-driver-systick", "exti", "highcode"] }
 
 panic-halt = "1.0"
 embedded-hal = "1.0.0"
+embedded-io-async = "0.7.0"
+nb = "1.1.0"
 
 embassy-executor = { version = "0.10.0", features = ["executor-thread"] }
+embassy-futures = "0.1.2"
 embassy-time = "0.5.1"
+embassy-usb = { version = "0.5.1", default-features = false }
 
 qingke = "0.8.3"
 qingke-rt = "0.8.3"
