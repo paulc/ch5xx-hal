@@ -650,7 +650,7 @@ const RB_OSC32M_SEL: u16 = 1 << 9;
 #[cfg(sys_ch585)]
 #[inline(never)]
 #[unsafe(link_section = ".data.ch5xx_hal.rcc.set_sysclk")]
-unsafe fn set_sysclk_ram(cfg: u16) {
+pub(crate) unsafe fn set_sysclk_ram(cfg: u16) {
     use core::ptr::{read_volatile as rd, write_volatile as wr};
 
     unsafe {
@@ -752,6 +752,9 @@ unsafe fn apply(config: &Config) {
 }
 
 #[cfg(sys_ch592)]
+pub(crate) use ch592::set_sysclk_ram;
+
+#[cfg(sys_ch592)]
 mod ch592 {
     /// `R8_FLASH_CFG` (`0x4000_1807`) values from WCH's `SetSysClock`. The
     /// flash controller's registers are not in the metapac yet.
@@ -784,7 +787,7 @@ mod ch592 {
     /// in flash: raw register pokes only. Run with interrupts disabled.
     #[inline(never)]
     #[unsafe(link_section = ".data.ch5xx_hal.rcc.set_sysclk")]
-    pub(super) unsafe fn set_sysclk_ram(mode: u32, div: u8, flash_cfg: u8) {
+    pub(crate) unsafe fn set_sysclk_ram(mode: u32, div: u8, flash_cfg: u8) {
         // A macro, not a closure: a closure could be emitted out of line
         // (in flash) in a debug build.
         macro_rules! sam {
