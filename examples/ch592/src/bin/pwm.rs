@@ -95,7 +95,11 @@ impl Checks {
     }
 
     /// Check the pin's period and duty (in permille) to within 1.5%.
+    ///
+    /// `set_duty` restarts the timer, and the period it restarts in is not at
+    /// the new duty, so let 2 ms (two periods at 1 kHz) pass first.
     fn pwm(&mut self, name: &str, p: P, period: u32, permille: u32) {
+        Delay.delay_ms(2);
         match measure(p) {
             Ok((per, hi)) => {
                 let d = hi * 1000 / per;
@@ -134,6 +138,9 @@ async fn main(_spawner: Spawner) -> ! {
         ..Default::default()
     });
     SDIPrint::enable();
+    // The 32 kHz crystal holds PA10/PA11 while it runs, and a reset leaves it
+    // running (a BLE or rtc run can leave it on). Selecting the LSI stops it.
+    let _ = hal::rtc::Rtc::new(p.RTC.reborrow(), Default::default());
     let mut delay = Delay;
     let mut c = Checks { pass: 0, fail: 0 };
     let hclk = hal::rcc::clocks().sysclk.0;

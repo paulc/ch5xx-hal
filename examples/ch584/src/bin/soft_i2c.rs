@@ -216,6 +216,9 @@ async fn main(_spawner: Spawner) -> ! {
         ..Default::default()
     });
     SDIPrint::enable();
+    // The 32 kHz crystal holds PA10/PA11 while it runs, and a reset leaves it
+    // running (a BLE or rtc run can leave it on). Selecting the LSI stops it.
+    let _ = hal::rtc::Rtc::new(p.RTC.reborrow(), Default::default());
     let mut delay = Delay;
     let mut c = Checks { pass: 0, fail: 0 };
     let sysclk = hal::rcc::clocks().sysclk.0;
