@@ -93,9 +93,8 @@ cargo run --release --bin blinky
 ```
 
 The runner uses `probe-rs run --chip CH585` to flash, reset, and stream `defmt`
-over RTT. The example manifest also carries the local metapac, qingke, and
-Embassy dependency patches required by this checkout. To build every example,
-select a TMR time driver:
+over RTT. The example manifest uses the local metapac build
+(`../ch5xx-data`). To build every example, select a TMR time driver:
 
 ```console
 cargo build --release --bins --no-default-features --features time-driver-tmr0

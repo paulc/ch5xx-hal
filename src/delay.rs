@@ -104,7 +104,6 @@ pub(crate) unsafe fn init() {
     // select HCLK/8). `STE` starts it.
     SYSTICK.stk_sr().modify(|w| w.set_cntif(false));
     SYSTICK.stk_cntl().write(|w| w.set_cntl(0));
-    SYSTICK.stk_cnth().write(|w| w.set_cnth(0));
     SYSTICK.stk_ctlr().modify(|w| {
         w.set_mode(false); // up-count
         w.set_stclk(true); // source: HCLK (not HCLK/8)
