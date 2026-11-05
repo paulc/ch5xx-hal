@@ -92,6 +92,8 @@ pub(crate) mod sys;
 
 #[cfg(any(adc_ch592, adc_ch585))]
 pub mod adc;
+#[cfg(feature = "ble")]
+pub mod ble;
 
 pub mod delay;
 pub mod dma;

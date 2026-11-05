@@ -132,6 +132,13 @@ exti = ["rt"]
 ## faster from RAM than from flash; `soft_i2c` needs it for 100 kHz.
 highcode = ["rt", "qingke-rt?/highcode"]
 
+## BLE: WCH's BLE library (vendored in `vendor/wch-ble`), TMOS driven
+## from embassy, GAP/GATT bindings and helpers. Binaries add `-Tble.x`
+## after `-Tlink.x`. The library's time-critical code runs from RAM. With
+## `executor`, the chip sleeps between BLE events; that needs
+## `time-driver-systick`.
+ble = ["highcode"]
+
 ## Emit `memory.x` from the metapac's memory layout, so `qingke-rt`'s `link.x`
 ## can find it. Enable in the binary crate, not the HAL (see ch32-hal).
 memory-x = ["ch5xx-metapac/memory-x"]

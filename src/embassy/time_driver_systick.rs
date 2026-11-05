@@ -98,6 +98,33 @@ impl embassy_time_driver::Driver for Driver {
     }
 }
 
+/// Counter ticks since [`init`], for `ble::sleep`.
+#[cfg(all(feature = "executor", feature = "ble"))]
+pub(crate) fn count(cs: critical_section::CriticalSection) -> u64 {
+    DRIVER.state.ticks_locked(cs, &DRIVER.timer)
+}
+
+/// The next alarm in counter ticks (`u64::MAX`: none), for `ble::sleep`.
+/// Alarms already due wake their tasks.
+#[cfg(all(feature = "executor", feature = "ble"))]
+pub(crate) fn next_alarm(cs: critical_section::CriticalSection) -> u64 {
+    let now = count(cs);
+    DRIVER.state.queue.borrow(cs).borrow_mut().next_expiration(now)
+}
+
+/// Move the timebase to counter tick `cnt` after a sleep, which stopped
+/// SysTick (HCLK stops), then re-arm for the next alarm.
+#[cfg(all(feature = "executor", feature = "ble"))]
+pub(crate) fn set_count(cs: critical_section::CriticalSection, cnt: u64) {
+    let stk = &SYSTICK;
+    stk.stk_ctlr().modify(|w| w.set_ste(false));
+    stk.stk_sr().modify(|w| w.set_cntif(false));
+    stk.stk_cntl().write(|w| w.set_cntl(0));
+    DRIVER.state.high.borrow(cs).set(cnt);
+    stk.stk_ctlr().modify(|w| w.set_ste(true));
+    DRIVER.state.trigger_alarm(cs, &DRIVER.timer);
+}
+
 /// SysTick's core-interrupt vector (core interrupt 12).
 #[qingke_rt::interrupt(core)]
 fn SysTick() {

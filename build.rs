@@ -281,6 +281,24 @@ fn main() {
 
     fs::write(out_dir.join("_macros.rs"), m).unwrap();
 
+    // BLE: WCH's library for the die, and `ble.x`, a linker script fragment
+    // for the binary (`-Tble.x` after `-Tlink.x`) placing what qingke-rt's
+    // `link.x` does not: `.highcode_lp` (time-critical library code, run
+    // from RAM like `.highcode`; `ble::init` copies it) and the C common
+    // symbols (the CH59x library has them; `ble::init` zeroes them).
+    if env::var_os("CARGO_FEATURE_BLE").is_some() {
+        let lib = match chip_name {
+            "ch584" | "ch585" => "CH58xBLE",
+            _ => "CH59xBLE",
+        };
+        let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+        println!("cargo:rustc-link-search=native={manifest_dir}/vendor/wch-ble");
+        println!("cargo:rustc-link-lib=static={lib}");
+        println!("cargo:rerun-if-changed=vendor/wch-ble/lib{lib}.a");
+        fs::write(out_dir.join("ble.x"), BLE_X).unwrap();
+        println!("cargo:rustc-link-search={}", out_dir.display());
+    }
+
     println!("cargo:rerun-if-changed=build.rs");
 }
 
@@ -316,3 +334,32 @@ macro_rules! {name} {{
 
     write!(out, "    }};\n}}").unwrap();
 }
+
+/// Linker script fragment for the `ble` feature (see `main`).
+const BLE_X: &str = r#"/* ch5xx-hal `ble`: place the WCH BLE library's own sections.
+   Use after qingke-rt's link.x: -Tlink.x -Tble.x */
+SECTIONS
+{
+    .highcode_lp : ALIGN(4)
+    {
+        __ble_highcode_lp_lma = LOADADDR(.highcode_lp);
+        __ble_highcode_lp_start = .;
+        *(.highcode_lp .highcode_lp.*);
+        . = ALIGN(4);
+        __ble_highcode_lp_end = .;
+    } > RAM AT > FLASH
+}
+INSERT AFTER .highcode;
+
+SECTIONS
+{
+    .ble_common (NOLOAD) : ALIGN(4)
+    {
+        __ble_common_start = .;
+        *(COMMON);
+        . = ALIGN(4);
+        __ble_common_end = .;
+    } > RAM
+}
+INSERT AFTER .bss;
+"#;
