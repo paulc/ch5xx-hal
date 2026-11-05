@@ -34,7 +34,9 @@ pub enum ClockSource {
     #[default]
     Lsi,
     /// External 32.768 kHz crystal (LSE) on PA10/PA11, which must be left as
-    /// floating inputs. Selecting [`ClockSource::Lsi`] stops it again.
+    /// floating inputs. Selecting [`ClockSource::Lsi`] stops it again. It
+    /// keeps running through a reset (only a power cycle stops it otherwise),
+    /// so PA10/PA11 stay held after the program that started it is gone.
     Lse,
 }
 

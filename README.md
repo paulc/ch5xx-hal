@@ -115,10 +115,21 @@ executor can be started directly from `main`.
 
 ## Target and atomics
 
-The QingKe V3C is RV32IMBC with **no A extension**. Build for
-`riscv32imc-unknown-none-elf`, not `riscv32imac`, and use `portable-atomic` with
-the `critical-section` feature for shared atomics. The example crate already has
-the required target and dependency configuration.
+Build for `riscv32imc-unknown-none-elf` on every supported chip, not
+`riscv32imac`, and use `portable-atomic` with the `critical-section` feature
+for shared atomics:
+
+- The QingKe V3C (CH584/CH585) is RV32IMBC with **no A extension**: `amoadd.w`
+  and friends raise an exception.
+- The QingKe V4C (CH592) has the A extension, but a thread-mode LR/SC loop
+  loses updates when an interrupt writes the same word between the `lr.w` and
+  the `sc.w`. On `riscv32imac` Embassy's run queue is such a loop, so a task
+  woken from an interrupt can drop out of the queue for good. Single AMOs and
+  critical sections are not affected. `examples/ch592`'s `wake_race` shows the
+  failure when built for `riscv32imac`.
+
+The example crates already have the required target and dependency
+configuration.
 
 ## Running examples
 
@@ -136,6 +147,27 @@ examples/hw-test.sh examples/ch584
 ```
 
 `examples/ch584-ble` has the BLE examples, on the low-power executor.
+
+The test crates run Embassy's `platform-spin` executor by default;
+`--no-default-features --features platform-riscv32` (for example in
+`CARGO_ARGS`) selects the one that sleeps in `wfi` between polls. The CH584
+suite passes on both, except `soft_i2c` at 100 kHz under `platform-riscv32`.
+
+Tests that enter low-power modes or need something beyond the board (`pwr`,
+`sleep_current`, `usb_cdc`) are marked `hw-test: manual` and run only when
+named:
+
+- `pwr`, `sleep_current` and the BLE examples log on UART0 TX (PB7, 115200
+  8N1), as SDI print stops in halt: wire PB7 to the WCH-LinkE RX and flash
+  without `--enable-sdi-print`.
+- `sleep_current` and the BLE examples switch the debug interface off after a
+  2 s pause at reset, and a chip in halt or sleep does not answer the
+  debugger. To reflash, power-cycle the board and flash at once, with the
+  board's own USB unplugged (otherwise it stays powered).
+- Measure current from the 5 V pin: fed from the LinkE's 3.3 V, the WeAct
+  CH584F's regulator draws about 0.55 mA backwards.
+- `usb_cdc` needs a host on the board's USB port; the BLE examples need a
+  scanner or central.
 
 The runner uses `probe-rs run --chip CH585` to flash, reset, and stream `defmt`
 over RTT. The example manifest uses the local metapac build

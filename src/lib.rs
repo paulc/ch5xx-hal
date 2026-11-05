@@ -35,6 +35,13 @@
 //! - `ble`: WCH's BLE library and its bindings (`ble`); with `executor` the
 //!   chip sleeps between BLE events, which needs `time-driver-systick`.
 //! - `memory-x`: emit `memory.x`, for the binary crate.
+//!
+//! # Target
+//!
+//! Build for `riscv32imc-unknown-none-elf` on every chip. The V3C has no A
+//! extension, and on the V4C a thread-mode LR/SC loop loses updates to a
+//! racing interrupt, which can drop an Embassy task from the run queue (see
+//! the README).
 
 #![no_std]
 #![allow(static_mut_refs)]
