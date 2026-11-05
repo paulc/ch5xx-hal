@@ -6,16 +6,17 @@ Embassy support.
 [Documentation](https://docs.rs/ch5xx-hal) · [Examples](examples/ch585)
 
 > **Note**
-> This crate is under development and its API may change. CH585 is the only
-> chip exercised on hardware so far.
+> This crate is under development and its API may change. CH585 and CH584
+> are exercised on hardware; CH592 support builds, and was tested on an
+> earlier port.
 
 ## Supported devices
 
 | Chip | Core | Status |
 | --- | --- | --- |
 | CH585 | QingKe V3C | GPIO, clocks, UART, and Embassy time drivers tested on hardware |
-| CH584 | QingKe V3C | Same die as CH585; tested on a WeAct CH584F board |
-| CH592 | QingKe V4C | Builds; clocks, GPIO, UART and SysTick time driver tested on an earlier port |
+| CH584 | QingKe V3C | Same die as CH585; every driver and BLE tested on a WeAct CH584F board (`examples/ch584`, `examples/ch584-ble`) |
+| CH592 | QingKe V4C | Builds; the drivers were tested on an earlier port (`examples/ch592`) |
 
 Select exactly one part feature: `ch584m`, `ch584x`, `ch584f`, `ch585m`,
 `ch585f`, `ch585c`, `ch585d`, `ch592x`, `ch592f`, `ch592a` or `ch592d`. The package decides which pins exist: only
@@ -32,13 +33,43 @@ code across chips with compatible peripherals.
   traits.
 - `delay`: `embedded-hal` `DelayNs` using SysTick or the Embassy timebase.
 - Embassy time driver on SysTick or TMR0–TMR3, plus typed interrupt bindings.
+- `timer`: counter, external counter, PWM and input capture (with a
+  `Decoder` for whole measurements) on TMR0-TMR3, timer-local DMA, and
+  `timer::pwmx`, the PWM4-PWM11 block.
+- `exti`: GPIO interrupts (`ExtiInput`, async edge and level waits).
+- `spi`: SPI0 master, blocking and async (DMA).
+- `i2c`: I2C master, blocking and async; `soft_i2c`, a bit-banged master on
+  any two pins clocked by a TMR (with clock stretching).
+- `adc`: the 12-bit ADC with its PGA, differential pairs, battery and
+  temperature channels, blocking, async, DMA and ring-buffer reads.
+- `usb`: device driver for `embassy-usb` (USB on CH592, USBFS on
+  CH584/CH585).
+- `ledc`: the LED/display controller (CH584/CH585).
+- `rtc`: the RTC counter, alarms and periodic interrupt; `wdg`: the
+  watchdog.
+- `pwr`: DC-DC, idle/halt/sleep/shutdown with their wake-up sources, the
+  battery monitor.
+- `ble` (feature): WCH's BLE library (vendored in `vendor/wch-ble`) with
+  TMOS driven from Embassy, advertising, a peripheral role and a GATT server.
+  With the `executor` feature, `embassy::Executor` runs TMOS and puts the
+  chip to sleep between BLE events.
+- `debug`: SDI print (`println!` over the WCH-LinkE debug link).
 
-Timer counter/PWM/capture and timer-local DMA drivers are experimental. They
-pass scoped detached CH585 tests but are not yet qualified for arbitrary bus
-loads, lossless streaming, or NFC transport.
+Timer-local DMA is not yet qualified for arbitrary bus loads, lossless
+streaming, or NFC transport.
 
-GPIO interrupts, I2C, SPI, ADC, USB, BLE, and a public RTC calendar/alarm API
-are not implemented yet.
+## Cargo features
+
+| Feature | Effect |
+| --- | --- |
+| a part (`ch584f`, `ch592f`, ...) | Selects the die, core and bonded pins; exactly one is required |
+| `rt` | Interrupt support through `qingke-rt` (default) |
+| `embassy`, `time-driver-*` | Embassy time driver (see below) |
+| `executor` | `embassy::Executor`, a thread-mode executor that sleeps when idle |
+| `exti` | Built-in GPIO interrupt handlers for `ExtiInput` |
+| `highcode` | Interrupt entry and `.highcode` functions run from RAM |
+| `ble` | BLE; binaries add `-Tble.x` after `-Tlink.x`. Sleep needs `executor` and `time-driver-systick` |
+| `memory-x` | Emit `memory.x` (enable in the binary crate) |
 
 ## Architecture
 
@@ -95,6 +126,16 @@ the required target and dependency configuration.
 cd examples/ch585
 cargo run --release --bin blinky
 ```
+
+`examples/ch584` (WeAct CH584F) and `examples/ch592` hold a hardware test
+per driver, needing no wiring beyond the board, reporting PASS/FAIL over SDI
+print; `examples/hw-test.sh` runs them and summarises:
+
+```console
+examples/hw-test.sh examples/ch584
+```
+
+`examples/ch584-ble` has the BLE examples, on the low-power executor.
 
 The runner uses `probe-rs run --chip CH585` to flash, reset, and stream `defmt`
 over RTT. The example manifest uses the local metapac build

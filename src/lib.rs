@@ -13,6 +13,28 @@
 //! [`rcc`] is a plain module rather than a driver directory because the tree is
 //! a single path with no peripheral prescalers: there is one frequency to
 //! report.
+//!
+//! # Parts
+//!
+//! Select exactly one part feature (`ch584m`, `ch584x`, `ch584f`, `ch585m`,
+//! `ch585f`, `ch585c`, `ch585d`, `ch592x`, `ch592f`, `ch592a`, `ch592d`). It
+//! picks the die, the QingKe core (V3C for CH584/CH585, V4C for CH592) and
+//! the bonded pins: only those get a singleton. Drivers whose block differs
+//! between dies are written against the metapac's block versions
+//! (`sys_ch592`, `tmr_ch585`, ...).
+//!
+//! # Features
+//!
+//! - `rt`: interrupt support (`qingke-rt`); [`init`] enables interrupts.
+//! - `embassy` with one `time-driver-*`: the Embassy time driver
+//!   ([`embassy`]).
+//! - `executor`: `embassy::Executor`, a thread-mode executor that sleeps when
+//!   idle.
+//! - `exti`: the built-in GPIO interrupt handlers for `exti::ExtiInput`.
+//! - `highcode`: interrupt entry and `.highcode` functions run from RAM.
+//! - `ble`: WCH's BLE library and its bindings (`ble`); with `executor` the
+//!   chip sleeps between BLE events, which needs `time-driver-systick`.
+//! - `memory-x`: emit `memory.x`, for the binary crate.
 
 #![no_std]
 #![allow(static_mut_refs)]
