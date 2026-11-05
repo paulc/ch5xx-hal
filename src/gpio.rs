@@ -199,6 +199,44 @@ pub(crate) trait SealedPin {
         }
     }
 
+    /// Make the pin an analog input: floating, with its digital input off
+    /// where the chip allows it.
+    #[allow(unused)]
+    #[inline]
+    fn set_as_analog(&self) {
+        critical_section::with(|_| {
+            self.set_direction(false);
+            self.set_pull(Pull::None);
+            #[cfg(any(sys_ch592, sys_ch585))]
+            self.set_digital_input(false);
+        })
+    }
+
+    /// Turn the pin's digital input buffer on or off: `R32_PIN_IN_DIS` for
+    /// PA0-PA15 (bit *n*) and PB0-PB15 (bit 16 + *n*), `R16_PIN_CONFIG` bits
+    /// 8-15 for PB16-PB23, as WCH's `GPIOxDigitalCfg`.
+    #[cfg(sys_ch585)]
+    #[inline]
+    fn set_digital_input(&self, enabled: bool) {
+        let n = self._pin();
+        let set = |w: &mut u32, bit: u8| {
+            if enabled {
+                *w &= !(1 << bit)
+            } else {
+                *w |= 1 << bit
+            }
+        };
+        match self._port() {
+            Port::A => pac::SYS.pin_in_dis().modify(|w| set(&mut w.0, n)),
+            Port::B if n < 16 => pac::SYS.pin_in_dis().modify(|w| set(&mut w.0, 16 + n)),
+            Port::B => pac::SYS.pin_config().modify(|w| {
+                let mut v = w.0 as u32;
+                set(&mut v, n - 8);
+                w.0 = v as u16
+            }),
+        }
+    }
+
     /// Set the drive strength (only meaningful for an output).
     #[inline]
     fn set_speed(&self, speed: Speed) {
@@ -265,6 +303,8 @@ impl<'d> Flex<'d> {
         critical_section::with(|_| {
             self.pin.set_direction(false);
             self.pin.set_pull(pull);
+            #[cfg(any(sys_ch592, sys_ch585))]
+            self.pin.set_digital_input(true);
         });
     }
 
@@ -427,15 +467,26 @@ impl<'d> Output<'d> {
     }
 }
 
-/// Enable the GPIO block.
+/// Set up the GPIO block.
 ///
-/// There is no peripheral clock gate to turn on — the CH5xx GPIO is always
-/// clocked. All this does is keep the same call shape as ch32-hal so `init` can
-/// treat it uniformly.
+/// There is no peripheral clock gate to turn on; the CH5xx GPIO is always
+/// clocked. Every pin comes out of reset as a floating input, the pads the
+/// package does not bond out included: those get a pull-up here, as nothing
+/// else can reach them and floating they draw current (about 27 uA in
+/// shutdown on a CH584F).
 pub(crate) unsafe fn init(_cs: CriticalSection) {
-    // Nothing to program: the CH5xx GPIO block is always clocked and every pin
-    // comes out of reset as a floating input. Kept so `init` has the same shape
-    // as ch32-hal's.
+    let [a, b] = crate::_generated::UNBONDED_PADS;
+    let g = pac::GPIO;
+    if a != 0 {
+        g.pa_pd_drv().modify(|w| w.0 &= !a);
+        g.pa_dir().modify(|w| w.0 &= !a);
+        g.pa_pu().modify(|w| w.0 |= a);
+    }
+    if b != 0 {
+        g.pb_pd_drv().modify(|w| w.0 &= !b);
+        g.pb_dir().modify(|w| w.0 &= !b);
+        g.pb_pu().modify(|w| w.0 |= b);
+    }
 }
 
 // --- embedded-hal impls ---------------------------------------------------
