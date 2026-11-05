@@ -30,7 +30,8 @@
 //! [`UartRx::read`] and [`UartRx::blocking_read`] fill the whole buffer.
 //! [`UartRx::read_some`] and [`UartRx::blocking_read_some`] instead wait only for
 //! the first byte and return the available prefix. The short async read is
-//! cancel-safe; exact reads and writes may consume a prefix if dropped. Standard
+//! cancel-safe; exact reads and writes may consume a prefix if dropped. [`UartRx::read_until_idle`]
+//! instead reads a whole burst, until the line goes idle. Standard
 //! [`embedded_io`] and, with `embassy`, [`embedded_io_async`] traits are provided
 //! for the full UART and its halves.
 //!
@@ -195,6 +196,10 @@ pub(crate) struct State {
     rx_waker: AtomicWaker,
     #[cfg(feature = "embassy")]
     tx_waker: AtomicWaker,
+    /// Set by the interrupt handler at an RX FIFO timeout, for
+    /// [`UartRx::read_until_idle`].
+    #[cfg(feature = "embassy")]
+    rx_idle: crate::atomic::AtomicBool,
     /// First line-status error seen by the interrupt handler or deferred by a
     /// short read: 0 none, 1 overrun, 2 parity, 3 framing, 4 break.
     rx_error: crate::atomic::AtomicU8,
@@ -208,6 +213,8 @@ impl State {
             rx_waker: AtomicWaker::new(),
             #[cfg(feature = "embassy")]
             tx_waker: AtomicWaker::new(),
+            #[cfg(feature = "embassy")]
+            rx_idle: crate::atomic::AtomicBool::new(false),
             rx_error: crate::atomic::AtomicU8::new(0),
         }
     }
@@ -315,6 +322,9 @@ impl<T: Instance> interrupt::typelevel::Handler<T::Interrupt> for InterruptHandl
             // chance to run - measured as thousands of entries per byte. Mask
             // the source and let the future re-enable it after draining.
             0b010 | 0b110 => {
+                if iir.iir_int_mask() == 0b110 {
+                    state.rx_idle.store(true, Ordering::Relaxed);
+                }
                 r.ier().modify(|w| w.set_ier_recv_rdy(false));
                 state.rx_waker.wake();
             }
@@ -614,6 +624,16 @@ impl<'d, T: Instance> UartRx<'d, T, Async> {
     pub async fn read_some(&mut self, buffer: &mut [u8]) -> Result<usize, Error> {
         read_async::<T>(buffer, false).await
     }
+
+    /// Read until `buffer` is full or the line goes idle after at least one
+    /// byte: the RX FIFO timeout, about four character times with no new
+    /// data. Returns the number of bytes read.
+    ///
+    /// Unlike [`UartRx::read_some`], which returns with whatever has arrived
+    /// so far, this collects a whole burst (a packet, a line) in one call.
+    pub async fn read_until_idle(&mut self, buffer: &mut [u8]) -> Result<usize, Error> {
+        read_until_idle_async::<T>(buffer).await
+    }
 }
 
 /// Bidirectional UART.
@@ -671,6 +691,9 @@ impl<'d, T: Instance, M: Mode> Uart<'d, T, M> {
     /// Measured on CH585: the UART interrupt output is not asserted while
     /// `MCR_LOOP` is set, so loopback has to be driven by polling. Use it with
     /// the blocking constructors, not the async ones.
+    ///
+    /// On CH592 only UART0 has the modem registers, `MCR` among them; the
+    /// other UARTs have no loopback.
     pub fn set_internal_loopback(&mut self, enable: bool) {
         let r = T::regs();
         r.mcr().modify(|w| w.set_mcr_loop(enable));
@@ -755,6 +778,11 @@ impl<'d, T: Instance> Uart<'d, T, Async> {
     /// Read whatever is available, waiting only for the first byte.
     pub async fn read_some(&mut self, buffer: &mut [u8]) -> Result<usize, Error> {
         self.rx.read_some(buffer).await
+    }
+
+    /// See [`UartRx::read_until_idle`].
+    pub async fn read_until_idle(&mut self, buffer: &mut [u8]) -> Result<usize, Error> {
+        self.rx.read_until_idle(buffer).await
     }
 }
 
@@ -1094,6 +1122,95 @@ async fn read_async<T: Instance>(buffer: &mut [u8], wait_for_full: bool) -> Resu
     });
     on_drop.defuse();
 
+    result
+}
+
+/// Set the RX FIFO trigger level (`FCR_FIFO_TRIG`: 1, 2, 4 or 7 bytes),
+/// keeping the FIFO and its contents.
+#[cfg(feature = "embassy")]
+fn set_rx_trigger<T: Instance>(trig: u8) {
+    T::regs().fcr().write(|w| {
+        w.set_fcr_fifo_en(true);
+        w.set_fcr_fifo_trig(trig);
+    });
+}
+
+/// Fill `buffer`, or stop early at an RX FIFO timeout.
+///
+/// The 16550 raises its timeout interrupt only while data sits in the FIFO
+/// below the trigger level, so each wake-up leaves the last byte behind:
+/// if the line then goes quiet, that byte triggers the timeout that ends
+/// the read. The trigger is raised to 4 bytes for the read, as with a
+/// 1-byte trigger a byte left behind raises receive-ready instead.
+#[cfg(feature = "embassy")]
+async fn read_until_idle_async<T: Instance>(buffer: &mut [u8]) -> Result<usize, Error> {
+    if buffer.is_empty() {
+        return Ok(0);
+    }
+
+    let r = T::regs();
+    let state = T::state();
+    let mut filled = 0usize;
+
+    state.rx_idle.store(false, Ordering::Relaxed);
+    set_rx_trigger::<T>(0b10);
+    let on_drop = OnDrop::new(|| {
+        r.ier().modify(|w| {
+            w.set_ier_recv_rdy(false);
+            w.set_ier_line_stat(false);
+        });
+        set_rx_trigger::<T>(0);
+    });
+
+    let result = poll_fn(|cx| {
+        state.rx_waker.register(cx.waker());
+        let idle = state.rx_idle.swap(false, Ordering::Relaxed);
+
+        r.ier().modify(|w| {
+            w.set_ier_recv_rdy(true);
+            w.set_ier_line_stat(true);
+        });
+        compiler_fence(Ordering::SeqCst);
+
+        loop {
+            if let Some(error) = take_rx_error::<T>() {
+                if filled > 0 {
+                    restore_rx_error::<T>(error);
+                    return Poll::Ready(Ok(filled));
+                }
+                return Poll::Ready(Err(error));
+            }
+
+            let lsr = r.lsr().read();
+            if let Some(error) = lsr_error(lsr) {
+                if filled > 0 {
+                    save_rx_error::<T>(error);
+                    return Poll::Ready(Ok(filled));
+                }
+                return Poll::Ready(Err(error));
+            }
+            if !lsr.lsr_data_rdy() {
+                break;
+            }
+            // Keep one byte back for the timeout, unless the timeout already
+            // fired or this byte completes the buffer.
+            if !idle && filled + 1 < buffer.len() && r.rfc().read().rfc() <= 1 {
+                break;
+            }
+            buffer[filled] = r.rbr().read().rbr();
+            filled += 1;
+            if filled == buffer.len() {
+                return Poll::Ready(Ok(filled));
+            }
+        }
+        if idle && filled > 0 {
+            return Poll::Ready(Ok(filled));
+        }
+        Poll::Pending
+    })
+    .await;
+
+    drop(on_drop);
     result
 }
 
