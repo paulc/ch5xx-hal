@@ -104,6 +104,8 @@ pub mod rtc;
 pub mod soft_i2c;
 #[cfg(any(sys_ch592, sys_ch585))]
 pub mod i2c;
+#[cfg(led_ch585)]
+pub mod ledc;
 #[cfg(any(spi_ch592, spi_ch585))]
 pub mod spi;
 pub mod timer;
