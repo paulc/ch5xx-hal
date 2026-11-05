@@ -1,0 +1,27 @@
+[build]
+# Not riscv32imac, though the QingKe V4C core has the A extension: an LR/SC
+# loop (compare_exchange) loses updates when an interrupt writes the same word
+# in between, and embassy's run queue is such a loop (see the `wake_race`
+# example). Without A, embassy and portable-atomic use critical sections.
+target = "riscv32imc-unknown-none-elf"
+
+[target.riscv32imc-unknown-none-elf]
+# probe-rs has no CH59x target yet, so flash with wlink. `--chip` is required:
+# wlink cannot auto-detect CH5xx parts and fails to attach (error 0x55).
+# `--speed low` is required too: at the default (high) speed the probe fails
+# to start wlink's flash routine on CH592 (WCH-LinkE firmware v3.2).
+runner = "wlink --chip CH59X --speed low flash"
+# runner = "probe-rs run --chip CH592"
+# No `-C target-feature=+xwchc` (WCH's extra compressed opcodes, ~2-3% smaller
+# code): rustc does not know the feature and warns that passing it will become
+# a hard error (rust-lang/rust#162235).
+
+# For `--target riscv32imac-unknown-none-elf` (to see `wake_race` fail).
+[target.riscv32imac-unknown-none-elf]
+runner = "wlink --chip CH59X --speed low flash"
+
+[unstable]
+build-std = ["core"]
+
+[env]
+DEFMT_LOG = "info"
