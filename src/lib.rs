@@ -133,9 +133,10 @@ pub fn init(config: Config) -> Peripherals {
         // Apply the clock tree first: SysTick counts Fsys, so the calibration
         // and the time driver below must see the final clock.
         rcc::set_config(config.rcc);
-        // `delay` measures the real SysTick rate against the RTC and keeps it
-        // for its busy-waits. `rcc::clocks()` keeps reporting the nominal
-        // frequency the tree was configured to.
+        // `delay` measures the real SysTick rate against the RTC, when the
+        // 32 kHz clock is the crystal, and keeps it for its busy-waits.
+        // `rcc::clocks()` keeps reporting the nominal frequency the tree was
+        // configured to.
         delay::init();
         // The time driver starts its counter and enables its own interrupt. It
         // reads the frequency from `rcc::clocks()`, so it must run after the

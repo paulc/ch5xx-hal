@@ -7,21 +7,22 @@
 //! The counter is started **once** by `init` and left running; each delay
 //! only reads `STK_CNT` and compares it against a target.
 //!
-//! # Why the rate is measured, not assumed
+//! # When the rate is measured
 //!
-//! The clock tree now gives an exact nominal `Fsys` ([`crate::rcc::Config::sysclk`]),
-//! so the rate could be derived instead. It is measured anyway because the RC
-//! oscillators are not exact and a wrong constant makes every delay wrong by
-//! the same factor.
+//! The clock tree gives an exact nominal `Fsys` ([`crate::rcc::Config::sysclk`]).
+//! `init` measures the counter against the 32 kHz RTC counter instead, the
+//! same trick WCH's `OSC_CAL` uses, when the 32 kHz clock is the crystal
+//! (LSE): then it corrects for the 16 MHz RC (HSI, +-1%). The result drives
+//! [`Delay`] and is readable as [`measured_sysclk`].
 //!
-//! `init` calibrates the counter against the 32 kHz RTC counter, the same
-//! trick WCH's `OSC_CAL` uses. The result drives [`Delay`] and is readable as
-//! [`measured_sysclk`]. It is a measurement, so it varies slightly between
-//! resets because the internal 32 kHz RC is the reference.
+//! The 32 kHz RC (LSI, the reset choice) is no reference: untrimmed it was
+//! 9.6% slow on a CH584F, so a measurement against it read 68.4 MHz for a
+//! 62.4 MHz clock and stretched every delay by as much. With the LSI `init`
+//! uses the nominal frequency, which is exact from the crystal. After
+//! switching the 32 kHz clock to the crystal, `recalibrate` measures.
 //!
-//! [`crate::rcc::clocks`] reports the nominal frequency of the configured clock
-//! tree instead. For HSE/PLL that is more accurate than a measurement
-//! referenced to an RC oscillator, and it keeps the value stable across resets.
+//! [`crate::rcc::clocks`] always reports the nominal frequency of the
+//! configured clock tree.
 //!
 //! Note that `probe-rs read` must not be used to check this: it halts the core
 //! and reports values the running firmware does not see.
@@ -114,7 +115,9 @@ pub(crate) unsafe fn init() {
     measure();
 }
 
-/// Re-measure the SysTick rate after [`crate::rcc::set_config`] changed `Fsys`.
+/// Re-measure the SysTick rate after [`crate::rcc::set_config`] changed `Fsys`,
+/// or after the 32 kHz clock was switched to the crystal (see the module docs:
+/// with the 32 kHz RC this takes the nominal rate).
 ///
 /// Does not start or stop the counter, so it can be used after a runtime clock
 /// change. It is only meaningful while SysTick is the free-running counter this
@@ -130,16 +133,22 @@ pub unsafe fn recalibrate() {
     measure();
 }
 
-/// Measure the counter and store the result for the busy-wait loops.
+/// Measure the counter, if the 32 kHz clock is the crystal, and store the
+/// result for the busy-wait loops.
 unsafe fn measure() {
-    TICKS_PER_SEC.store(calibrate(), Ordering::Relaxed);
+    let hz = if crate::pac::SYS.ck32k_config().read().clk_osc32k_xt() {
+        calibrate()
+    } else {
+        crate::rcc::clocks().sysclk.0
+    };
+    TICKS_PER_SEC.store(hz, Ordering::Relaxed);
 }
 
 /// The SysTick rate this module measured at [`crate::init`] or at the last
-/// `recalibrate`.
+/// `recalibrate`, or the nominal rate where it did not measure.
 ///
 /// This is what [`Delay`] uses. [`crate::rcc::clocks`] reports the nominal rate
-/// of the configured tree instead; the two differ by the RC oscillator error.
+/// of the configured tree instead; the two differ by the HSI error.
 pub fn measured_sysclk() -> crate::time::Hertz {
     crate::time::Hertz(TICKS_PER_SEC.load(Ordering::Relaxed))
 }

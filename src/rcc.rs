@@ -69,9 +69,9 @@
 //!
 //! [`clocks`] reports the **nominal** frequency of the configured tree.
 //! [`crate::delay`] separately measures the real SysTick rate against the 32 kHz
-//! RTC and keeps that number for its busy-waits: for HSE/PLL the nominal value
-//! is more accurate than a measurement referenced to an RC oscillator, and for
-//! HSI the two agree to within its tolerance.
+//! RTC, when that runs from the crystal, and keeps that number for its
+//! busy-waits: for HSE/PLL the nominal value is as accurate, and the 32 kHz RC
+//! is far less accurate than either.
 //!
 //! Do not read `CLK_CFG` with `probe-rs read`: that halts the core and the value
 //! it reports is not what the running firmware sees. Read it from firmware and
