@@ -3,12 +3,16 @@
 //! Normal counting runs at Fsys without a prescaler. TMR0/3 additionally have
 //! the SDK's NFC clock mode. DMA belongs to the timer, not a separate channel.
 //! Clock changes and deep sleep require stopping and rebuilding active drivers.
+//!
+//! The separate PWMX block (PWM4-PWM11) is in [`pwmx`].
 
 use crate::{interrupt, pac, peripherals};
 
 pub mod counter;
 pub mod input_capture;
 pub mod low_level;
+#[cfg(any(tmr_ch592, tmr_ch585))]
+pub mod pwmx;
 pub mod simple_pwm;
 mod types;
 pub use types::*;
