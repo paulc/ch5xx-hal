@@ -212,6 +212,28 @@ pub(crate) trait SealedPin {
         })
     }
 
+    /// Turn the pin's digital input buffer on or off (`R32_PIN_CONFIG2`).
+    ///
+    /// The bits pack like the PB interrupt bits: PA*n* is bit *n*, PB*n* bit
+    /// 16 + *n*, and PB22/PB23 bits 24/25.
+    #[cfg(sys_ch592)]
+    #[inline]
+    fn set_digital_input(&self, enabled: bool) {
+        let n = self._pin();
+        let bit = match self._port() {
+            Port::A => n,
+            Port::B if n >= 16 => n + 2,
+            Port::B => 16 + n,
+        };
+        pac::SYS.pin_config2().modify(|w| {
+            if enabled {
+                w.0 &= !(1 << bit)
+            } else {
+                w.0 |= 1 << bit
+            }
+        });
+    }
+
     /// Turn the pin's digital input buffer on or off: `R32_PIN_IN_DIS` for
     /// PA0-PA15 (bit *n*) and PB0-PB15 (bit 16 + *n*), `R16_PIN_CONFIG` bits
     /// 8-15 for PB16-PB23, as WCH's `GPIOxDigitalCfg`.

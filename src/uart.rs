@@ -229,16 +229,25 @@ pub(crate) trait SealedInstance {
 }
 
 macro_rules! impl_instance {
+    ($inst:ident, no_remap) => {
+        impl_instance!(@impl $inst, |remapped| assert!(!remapped, "no remap for this UART"));
+    };
     ($inst:ident, $setter:ident) => {
+        impl_instance!(@impl $inst, |remapped| pac::SYS.pin_alternate().modify(|w| w.$setter(remapped)));
+    };
+    (@impl $inst:ident, $remap:expr) => {
         impl SealedInstance for peripherals::$inst {
             #[inline]
             fn regs() -> pac::uart::UartFull {
-                pac::$inst
+                // On CH592 only UART0 is the full block; the others lack the
+                // modem registers, at the same offsets otherwise.
+                unsafe { pac::uart::UartFull::from_ptr(pac::$inst.as_ptr()) }
             }
 
             #[inline]
             unsafe fn set_remap(remapped: bool) {
-                pac::SYS.pin_alternate().modify(|w| w.$setter(remapped));
+                let f: fn(bool) = $remap;
+                f(remapped)
             }
 
             #[inline]
@@ -257,7 +266,10 @@ macro_rules! impl_instance {
 impl_instance!(UART0, set_pin_uart0);
 impl_instance!(UART1, set_pin_uart1);
 impl_instance!(UART2, set_pin_uart2);
+#[cfg(sys_ch585)]
 impl_instance!(UART3, set_pin_uart3);
+#[cfg(sys_ch592)]
+impl_instance!(UART3, no_remap);
 
 /// Interrupt handler shared by all async UART instances.
 ///
@@ -350,13 +362,22 @@ macro_rules! impl_pins {
 // Datasheet table 7-8, default column.
 impl_pins!(UART0, 0, rx: [PB4], tx: [PB7]);
 impl_pins!(UART1, 0, rx: [PA8], tx: [PA9]);
+#[cfg(sys_ch585)]
 impl_pins!(UART2, 0, rx: [PA6], tx: [PA7]);
 impl_pins!(UART3, 0, rx: [PA4], tx: [PA5]);
 // Datasheet table 7-8, remapped column.
 impl_pins!(UART0, 1, rx: [PA15], tx: [PA14]);
 impl_pins!(UART1, 1, rx: [PB12], tx: [PB13]);
+#[cfg(sys_ch585)]
 impl_pins!(UART2, 1, rx: [PB22], tx: [PB23]);
+#[cfg(sys_ch585)]
 impl_pins!(UART3, 1, rx: [PB20], tx: [PB21]);
+// CH592 (CH592SFR.h, R16_PIN_ALTERNATE): UART2 defaults to PB22/PB23, the
+// other way round from CH585, and UART3 has no remap.
+#[cfg(sys_ch592)]
+impl_pins!(UART2, 0, rx: [PB22], tx: [PB23]);
+#[cfg(sys_ch592)]
+impl_pins!(UART2, 1, rx: [PA6], tx: [PA7]);
 
 /// Transmit half of a UART.
 pub struct UartTx<'d, T: Instance, M: Mode> {

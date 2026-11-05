@@ -50,7 +50,10 @@ impl<'d, T: Instance> SimplePwm<'d, T> {
     pub fn write<'a>(
         &'a mut self,
         buffer: &'static mut [u32],
-    ) -> Result<dma::Transfer<'a, 'd, T>, (dma::Error, &'static mut [u32])> {
+    ) -> Result<dma::Transfer<'a, 'd, T>, (dma::Error, &'static mut [u32])> 
+    where
+        T: super::DmaInstance,
+    {
         if buffer.iter().any(|v| *v > self.inner.period.get()) {
             return Err((dma::Error::InvalidWidth, buffer));
         }

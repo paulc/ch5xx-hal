@@ -187,7 +187,11 @@ unsafe fn enable_interrupts() {
         pac::PFIC.sctlr().write_value(sctlr);
     });
 
-    unsafe { qingke::register::gintenr::write(0x08) };
+    // QingKe V4C (CH592) comes out of qingke-rt's startup with them on.
+    #[cfg(any(ch584, ch585))]
+    unsafe {
+        qingke::register::gintenr::write(0x08)
+    };
 }
 
 #[macro_export]

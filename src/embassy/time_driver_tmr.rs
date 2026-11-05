@@ -45,33 +45,29 @@ use crate::pac;
 // wall from `tmr()`/`IRQ`.
 
 /// The TMR instance this build drives.
+///
+/// As the full register block: on CH592 TMR0 and TMR3 lack only the DMA
+/// registers, which this driver does not use.
 #[inline(always)]
-fn tmr() -> &'static crate::pac::tmr::TmrFull {
+fn tmr() -> crate::pac::tmr::TmrFull {
     #[cfg(feature = "time-driver-tmr0")]
-    {
-        &crate::pac::TMR0
-    }
+    let p = crate::pac::TMR0.as_ptr();
     #[cfg(all(not(feature = "time-driver-tmr0"), feature = "time-driver-tmr1"))]
-    {
-        &crate::pac::TMR1
-    }
+    let p = crate::pac::TMR1.as_ptr();
     #[cfg(all(
         not(feature = "time-driver-tmr0"),
         not(feature = "time-driver-tmr1"),
         feature = "time-driver-tmr2"
     ))]
-    {
-        &crate::pac::TMR2
-    }
+    let p = crate::pac::TMR2.as_ptr();
     #[cfg(all(
         not(feature = "time-driver-tmr0"),
         not(feature = "time-driver-tmr1"),
         not(feature = "time-driver-tmr2"),
         feature = "time-driver-tmr3"
     ))]
-    {
-        &crate::pac::TMR3
-    }
+    let p = crate::pac::TMR3.as_ptr();
+    unsafe { crate::pac::tmr::TmrFull::from_ptr(p) }
 }
 
 /// The interrupt vector matching the selected instance.

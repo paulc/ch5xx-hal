@@ -14,9 +14,11 @@ Embassy support.
 | Chip | Core | Status |
 | --- | --- | --- |
 | CH585 | QingKe V3C | GPIO, clocks, UART, and Embassy time drivers tested on hardware |
+| CH584 | QingKe V3C | Same die as CH585; tested on a WeAct CH584F board |
+| CH592 | QingKe V4C | Builds; clocks, GPIO, UART and SysTick time driver tested on an earlier port |
 
 Select exactly one part feature: `ch584m`, `ch584x`, `ch584f`, `ch585m`,
-`ch585f`, `ch585c` or `ch585d`. The package decides which pins exist: only
+`ch585f`, `ch585c`, `ch585d`, `ch592x`, `ch592f`, `ch592a` or `ch592d`. The package decides which pins exist: only
 bonded pins get a singleton. Register access comes from
 [`ch5xx-metapac`](https://github.com/ch32-rs/ch5xx-data), allowing shared driver
 code across chips with compatible peripherals.

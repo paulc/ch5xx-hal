@@ -41,7 +41,10 @@ impl<'d, T: Instance> InputCapture<'d, T> {
     pub fn read<'a>(
         &'a mut self,
         buffer: &'static mut [u32],
-    ) -> Result<dma::Transfer<'a, 'd, T>, (dma::Error, &'static mut [u32])> {
+    ) -> Result<dma::Transfer<'a, 'd, T>, (dma::Error, &'static mut [u32])> 
+    where
+        T: super::DmaInstance,
+    {
         if let Err(e) = dma::Descriptor::new(buffer.as_ptr() as usize, buffer.len()) {
             return Err((e, buffer));
         }
@@ -63,7 +66,10 @@ impl<'d, T: Instance> InputCapture<'d, T> {
     pub fn read_circular<'a>(
         &'a mut self,
         buffer: &'static mut [u32],
-    ) -> Result<dma::Transfer<'a, 'd, T>, (dma::Error, &'static mut [u32])> {
+    ) -> Result<dma::Transfer<'a, 'd, T>, (dma::Error, &'static mut [u32])> 
+    where
+        T: super::DmaInstance,
+    {
         if let Err(e) = dma::Descriptor::new(buffer.as_ptr() as usize, buffer.len()) {
             return Err((e, buffer));
         }

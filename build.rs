@@ -40,6 +40,7 @@ fn main() {
     let chip_name = match part.as_str() {
         "ch584m" | "ch584x" | "ch584f" => "ch584",
         "ch585m" | "ch585f" | "ch585c" | "ch585d" => "ch585",
+        "ch592x" | "ch592f" | "ch592a" | "ch592d" => "ch592",
         other => panic!("unknown ch5xx part `{other}`"),
     };
     println!("cargo:rustc-cfg={chip_name}");
@@ -60,7 +61,8 @@ fn main() {
     }
 
     // Bonded GPIO pins per package, from the datasheets' pin definition
-    // tables (CH585/CH584 DS V1.6). Metadata only lists pins that carry a
+    // tables (CH585/CH584 DS V1.6, CH592
+    // DS V1.9). Metadata only lists pins that carry a
     // peripheral signal, so pads with no alternate function would not be
     // discovered, and it does not say which pads a package bonds out. Only these pins get a singleton, and pin trait impls for
     // any other pin are left out (`if_pin!`).
@@ -88,6 +90,18 @@ fn main() {
         ],
         // QFN20: 12.
         "ch585d" => &[('A', &[9, 12, 13, 14, 15]), ('B', &[10, 11, 12, 13, 14, 15, 22])],
+        // QFN32: 24.
+        "ch592x" => &[
+            ('A', &[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]),
+            ('B', &[0, 4, 6, 7, 10, 11, 12, 13, 14, 15, 22, 23]),
+        ],
+        // QFN28: 20.
+        "ch592f" | "ch592a" => &[
+            ('A', &[4, 5, 8, 9, 10, 11, 12, 13, 14, 15]),
+            ('B', &[4, 7, 10, 11, 12, 13, 14, 15, 22, 23]),
+        ],
+        // QFN20: 12.
+        "ch592d" => &[('A', &[10, 11, 12, 13, 14, 15]), ('B', &[10, 11, 12, 13, 14, 15])],
         other => panic!("no pin list for part `{other}`"),
     };
 

@@ -61,7 +61,7 @@ rt = ["dep:qingke-rt"]
 
 # Part-selection features, one per part number as in ch32-hal. Exactly one
 # must be enabled. A part selects its die in `ch5xx-metapac` and its QingKe
-# core; the package decides which pins get singletons (see build.rs).
+# core (CH584/CH585 are V3C, CH592 is V4C); the package decides which pins get singletons (see build.rs).
 ## CH584M, QFN48.
 ch584m = ["ch5xx-metapac/ch584", "_v3c"]
 ## CH584X, QFN48, 512 KB flash.
@@ -76,9 +76,18 @@ ch585f = ["ch5xx-metapac/ch585", "_v3c"]
 ch585c = ["ch5xx-metapac/ch585", "_v3c"]
 ## CH585D, QFN20.
 ch585d = ["ch5xx-metapac/ch585", "_v3c"]
+## CH592X, QFN32.
+ch592x = ["ch5xx-metapac/ch592", "_v4c"]
+## CH592F, QFN28.
+ch592f = ["ch5xx-metapac/ch592", "_v4c"]
+## CH592A, QFN28 (2.3 V minimum supply, no page erase).
+ch592a = ["ch5xx-metapac/ch592", "_v4c"]
+## CH592D, QFN20.
+ch592d = ["ch5xx-metapac/ch592", "_v4c"]
 
 # The QingKe cores, selected by the part features.
 _v3c = ["qingke-rt?/v3c", "qingke/v3c"]
+_v4c = ["qingke-rt?/v4c", "qingke/v4c"]
 
 ## Embassy support. This only pulls the deps in; pick a driver with one of the
 ## `time-driver-*` features below.

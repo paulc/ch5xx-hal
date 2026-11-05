@@ -18,10 +18,17 @@ pub trait Instance: crate::PeripheralType + SealedInstance + Send + 'static {
     type Interrupt: interrupt::typelevel::Interrupt;
 }
 
-/// Timer instances supporting the SDK's dedicated NFC clock.
+/// Timer instances supporting the SDK's dedicated NFC clock (CH585).
 pub trait NfcClockInstance: Instance {}
 
+/// Timer instances with local DMA: all four on CH585, TMR1 and TMR2 on CH592.
+pub trait DmaInstance: Instance {}
+
 pub(crate) trait SealedInstance {
+    /// The instance has the DMA registers.
+    const HAS_DMA: bool;
+    /// The registers, as the full block: TMR0/TMR3 on CH592 lack only the
+    /// DMA ones, which `HAS_DMA` guards.
     fn regs() -> pac::tmr::TmrFull;
     unsafe fn set_remap(remap: bool);
     #[cfg(feature = "embassy")]
@@ -36,13 +43,21 @@ pub(crate) struct State {
 }
 
 macro_rules! instance {
-    ($name:ident, $set:ident) => {
+    ($name:ident, no_remap, dma: $dma:tt) => {
+        instance!(@impl $name, dma: $dma, |remap| assert!(!remap, "no remap for this timer"));
+    };
+    ($name:ident, $set:ident, dma: $dma:tt) => {
+        instance!(@impl $name, dma: $dma, |remap| pac::SYS.pin_alternate().modify(|w| w.$set(remap)));
+    };
+    (@impl $name:ident, dma: $dma:tt, $remap:expr) => {
         impl SealedInstance for peripherals::$name {
+            const HAS_DMA: bool = $dma;
             fn regs() -> pac::tmr::TmrFull {
-                pac::$name
+                unsafe { pac::tmr::TmrFull::from_ptr(pac::$name.as_ptr()) }
             }
             unsafe fn set_remap(remap: bool) {
-                pac::SYS.pin_alternate().modify(|w| w.$set(remap));
+                let f: fn(bool) = $remap;
+                f(remap)
             }
             #[cfg(feature = "embassy")]
             fn state() -> &'static State {
@@ -57,20 +72,35 @@ macro_rules! instance {
         impl Instance for peripherals::$name {
             type Interrupt = interrupt::typelevel::$name;
         }
+        instance!(@dma $name, $dma);
     };
+    (@dma $name:ident, true) => {
+        impl DmaInstance for peripherals::$name {}
+    };
+    (@dma $name:ident, false) => {};
 }
-#[cfg(not(feature = "time-driver-tmr0"))]
-instance!(TMR0, set_pin_tmr0);
-#[cfg(not(feature = "time-driver-tmr1"))]
-instance!(TMR1, set_pin_tmr1);
-#[cfg(not(feature = "time-driver-tmr2"))]
-instance!(TMR2, set_pin_tmr2);
-#[cfg(not(feature = "time-driver-tmr3"))]
-instance!(TMR3, set_pin_tmr3);
-#[cfg(not(feature = "time-driver-tmr0"))]
+
+#[cfg(all(tmr_ch585, not(feature = "time-driver-tmr0")))]
+instance!(TMR0, set_pin_tmr0, dma: true);
+#[cfg(all(tmr_ch585, not(feature = "time-driver-tmr1")))]
+instance!(TMR1, set_pin_tmr1, dma: true);
+#[cfg(all(tmr_ch585, not(feature = "time-driver-tmr2")))]
+instance!(TMR2, set_pin_tmr2, dma: true);
+#[cfg(all(tmr_ch585, not(feature = "time-driver-tmr3")))]
+instance!(TMR3, set_pin_tmr3, dma: true);
+#[cfg(all(tmr_ch585, not(feature = "time-driver-tmr0")))]
 impl NfcClockInstance for peripherals::TMR0 {}
-#[cfg(not(feature = "time-driver-tmr3"))]
+#[cfg(all(tmr_ch585, not(feature = "time-driver-tmr3")))]
 impl NfcClockInstance for peripherals::TMR3 {}
+
+#[cfg(all(tmr_ch592, not(feature = "time-driver-tmr0")))]
+instance!(TMR0, set_pin_tmr0, dma: false);
+#[cfg(all(tmr_ch592, not(feature = "time-driver-tmr1")))]
+instance!(TMR1, set_pin_tmr1, dma: true);
+#[cfg(all(tmr_ch592, not(feature = "time-driver-tmr2")))]
+instance!(TMR2, set_pin_tmr2, dma: true);
+#[cfg(all(tmr_ch592, not(feature = "time-driver-tmr3")))]
+instance!(TMR3, no_remap, dma: false);
 
 mod sealed {
     pub trait Pin {}
@@ -100,7 +130,7 @@ pin!(TMR2, 0, PA11);
 pin!(TMR2, 1, PB11);
 #[cfg(not(feature = "time-driver-tmr3"))]
 pin!(TMR3, 0, PB22);
-#[cfg(not(feature = "time-driver-tmr3"))]
+#[cfg(all(tmr_ch585, not(feature = "time-driver-tmr3")))]
 pin!(TMR3, 1, PA2);
 
 /// One handler for the instance's currently enabled timer events.
@@ -117,7 +147,7 @@ impl<T: Instance> interrupt::typelevel::Handler<T::Interrupt> for InterruptHandl
         let r = T::regs();
         let events = r.int_flag().read().0 & r.inter_en().read().0;
         r.inter_en().modify(|w| w.0 &= !events);
-        if events & Events::DMA_END.bits() != 0 && T::state().rx_finite.load(crate::atomic::Ordering::Relaxed) {
+        if T::HAS_DMA && events & Events::DMA_END.bits() != 0 && T::state().rx_finite.load(crate::atomic::Ordering::Relaxed) {
             // Do not let an exhausted finite capture fill/overflow the FIFO
             // while its task is waiting to resume. TX must instead drain.
             r.ctrl_mod().modify(|w| w.set_count_en(false));

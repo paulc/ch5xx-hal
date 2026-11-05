@@ -1,8 +1,9 @@
 //! Busy-wait delays on the core SysTick counter.
 //!
 //! CH5xx's SysTick is the WCH variant: `STK_CTLR` (`STE` bit 0, `STCLK` bit 2,
-//! `MODE` bit 4), `STK_SR.CNTIF`, and the 32-bit `STK_CNTL` / `STK_CMPLR` pair.
-//! There is no free-running 64-bit counter.
+//! `MODE` bit 4), `STK_SR.CNTIF`, and the 32-bit `STK_CNTL` / `STK_CMPLR` pair
+//! on CH584/CH585. CH592 has the 64-bit counter and compare of the CH32V20x;
+//! the delays use the low 32 bits.
 //!
 //! The counter is started **once** by `init` and left running; each delay
 //! only reads `STK_CNT` and compares it against a target.
@@ -105,6 +106,9 @@ pub(crate) unsafe fn init() {
     // select HCLK/8). `STE` starts it.
     SYSTICK.stk_sr().modify(|w| w.set_cntif(false));
     SYSTICK.stk_cntl().write(|w| w.set_cntl(0));
+    // CH592's SysTick is 64 bits; the delays use the low 32.
+    #[cfg(systick_ch583)]
+    SYSTICK.stk_cnth().write(|w| w.set_cnth(0));
     SYSTICK.stk_ctlr().modify(|w| {
         w.set_mode(false); // up-count
         w.set_stclk(true); // source: HCLK (not HCLK/8)

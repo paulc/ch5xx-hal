@@ -12,6 +12,15 @@ pub enum Error {
     Fifo,
 }
 
+/// Bytes of address space the DMA registers reach from 0x2000_0000: 17 bits
+/// on CH585, 16 on CH592 (whose TMR DMA registers are 16-bit).
+#[cfg(tmr_ch585)]
+const WINDOW: usize = 0x2_0000;
+#[cfg(tmr_ch592)]
+const WINDOW: usize = 0x1_0000;
+/// The word-address bits of `DMA_NOW`/`DMA_BEG`/`DMA_END`.
+pub(crate) const MASK: u32 = (WINDOW - 4) as u32;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Descriptor {
     pub(crate) start: u32,
@@ -19,6 +28,7 @@ pub struct Descriptor {
 }
 impl Descriptor {
     /// CH585 SRAM window; address bits 14/15/16 were independently probed.
+    /// On CH592 the window is 64 KiB, which covers its SRAM.
     /// Exclusive END itself must be representable, so the top word is reserved.
     pub fn new(address: usize, words: usize) -> Result<Self, Error> {
         if words == 0 {
@@ -31,7 +41,7 @@ impl Descriptor {
             .checked_mul(4)
             .and_then(|n| address.checked_add(n))
             .ok_or(Error::Length)?;
-        if address < 0x2000_0000 || end >= 0x2002_0000 {
+        if address < 0x2000_0000 || end >= 0x2000_0000 + WINDOW {
             return Err(Error::Address);
         }
         Ok(Self {

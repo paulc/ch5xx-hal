@@ -2,13 +2,18 @@
 //!
 //! # Why this is not the CH32 driver
 //!
-//! CH5xx's SysTick is a WCH variant with a **32-bit** counter:
+//! The SysTick of CH584/CH585 (QingKe V3C) is a WCH variant with a **32-bit**
+//! counter:
 //! `STK_CTLR` (`STE`, `STIE`, `STCLK`, `STRE`, `MODE`), `STK_SR.CNTIF`,
 //! `STK_CNTL` and `STK_CMPLR`. The `STK_CNTH`/`STK_CMPHR` registers the PAC
 //! exposes are the padding words at +0x0C and +0x14 — reading them returns the
 //! neighbour, not a real high half. In particular the driver must not use
 //! `stk_cmph().write_value(next >> 32)`: on the real part that writes into
 //! `STK_CMPLR`'s neighbourhood.
+//!
+//! CH592 (QingKe V4C) has the 64-bit counter and compare of the CH32V20x.
+//! The driver zeroes their high halves and uses the low 32 bits only, so the
+//! same reload model serves both.
 //!
 //! Measured behaviour:
 //!
@@ -126,6 +131,13 @@ pub unsafe fn init() {
     stk.stk_ctlr().modify(|w| w.set_ste(false));
     stk.stk_sr().modify(|w| w.set_cntif(false));
     stk.stk_cntl().write(|w| w.set_cntl(0));
+    // CH592 (QingKe V4C) has the 64-bit SysTick: zero the high halves, so the
+    // reload compares against a 32-bit end value like on CH584/CH585.
+    #[cfg(systick_ch583)]
+    {
+        stk.stk_cnth().write(|w| w.set_cnth(0));
+        stk.stk_cmphr().write(|w| w.set_cmph(0));
+    }
     stk.stk_cmplr()
         .write(|w| w.set_cmpl(<SystickTimer as ReloadTimer>::MAX_PERIOD - 1));
 
