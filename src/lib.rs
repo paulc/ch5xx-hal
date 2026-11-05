@@ -61,10 +61,8 @@ pub mod mode {
     impl_mode!(Blocking);
 
     /// Async mode, driven by the peripheral interrupt.
-    #[cfg(feature = "embassy")]
     pub struct Async;
 
-    #[cfg(feature = "embassy")]
     impl_mode!(Async);
 }
 
@@ -94,6 +92,8 @@ pub(crate) mod sys;
 
 pub mod delay;
 pub mod dma;
+#[cfg(any(gpio_ch592, gpio_ch585))]
+pub mod exti;
 pub mod gpio;
 pub mod timer;
 pub mod uart;
@@ -153,6 +153,8 @@ pub fn init(config: Config) -> Peripherals {
 
     critical_section::with(|cs| unsafe {
         gpio::init(cs);
+        #[cfg(feature = "exti")]
+        exti::init(cs);
     });
 
     p
