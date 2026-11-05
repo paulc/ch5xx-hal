@@ -30,6 +30,12 @@
 //! [`crate::rcc::clocks`], so any `tick-hz-*` feature works; a rate that does
 //! not divide the clock evenly loses sub-tick precision but never runs
 //! backwards.
+//!
+//! # Executor
+//!
+//! The `executor` feature adds [`Executor`], a thread-mode executor that
+//! waits in `wfi` when idle and, with `ble`, runs TMOS and sleeps between BLE
+//! events. It replaces embassy-executor's `platform-*` executors.
 
 #[cfg(any(
     feature = "time-driver-systick",
@@ -75,6 +81,13 @@ compile_error!("enable only one time driver: `time-driver-systick` or a single `
     all(feature = "time-driver-tmr2", feature = "time-driver-tmr3"),
 ))]
 compile_error!("enable only one `time-driver-tmr*` feature");
+
+#[cfg(feature = "executor")]
+mod executor;
+#[cfg(feature = "executor")]
+pub use executor::Executor;
+#[cfg(all(feature = "executor", feature = "ble"))]
+pub(crate) use executor::pended;
 
 #[cfg(feature = "time-driver-systick")]
 #[path = "time_driver_systick.rs"]

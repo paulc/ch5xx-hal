@@ -41,6 +41,7 @@ embassy-usb-driver = { version = "0.2.2", optional = true }
 embassy-sync = "0.8.0"
 embassy-time-driver = { version = "0.2.2", optional = true }
 embassy-time-queue-utils = { version = "0.3.2", optional = true }
+embassy-executor = { version = "0.10.0", optional = true }
 
 # The QingKe V3C core has no A extension: `amoadd.w` and friends raise a
 # hardware exception on the CH585. portable-atomic supplies CAS from a critical
@@ -103,6 +104,11 @@ embassy = [
     "dep:embedded-io-async",
     "rt",
 ]
+
+## A thread-mode embassy executor that sleeps when idle
+## (`embassy::Executor`); with `ble`, it runs TMOS and sleeps between BLE
+## events. Replaces embassy-executor's `platform-*` executors.
+executor = ["embassy", "dep:embassy-executor"]
 
 ## Time driver on the core SysTick counter. Lowest latency, but it takes SysTick
 ## away from the blocking `delay` driver — both cannot own it.
