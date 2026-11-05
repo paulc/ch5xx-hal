@@ -95,6 +95,8 @@ pub mod dma;
 #[cfg(any(gpio_ch592, gpio_ch585))]
 pub mod exti;
 pub mod gpio;
+#[cfg(any(tmr_ch592, tmr_ch585))]
+pub mod soft_i2c;
 #[cfg(any(sys_ch592, sys_ch585))]
 pub mod i2c;
 #[cfg(any(spi_ch592, spi_ch585))]
