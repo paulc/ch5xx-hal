@@ -90,6 +90,9 @@ pub use crate::_generated::{peripherals, Peripherals};
 
 pub(crate) mod sys;
 
+#[cfg(any(adc_ch592, adc_ch585))]
+pub mod adc;
+
 pub mod delay;
 pub mod dma;
 #[cfg(any(gpio_ch592, gpio_ch585))]
