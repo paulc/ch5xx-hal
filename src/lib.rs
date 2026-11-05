@@ -108,6 +108,8 @@ pub mod i2c;
 pub mod spi;
 pub mod timer;
 pub mod uart;
+#[cfg(any(usb_ch592, usbfs_ch585))]
+pub mod usb;
 #[cfg(any(sys_ch592, sys_ch585))]
 pub mod wdg;
 

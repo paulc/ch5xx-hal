@@ -30,6 +30,8 @@ embedded-io = "0.7.1"
 embedded-io-async = { version = "0.7.0", optional = true }
 
 embassy-hal-internal = "0.5.0"
+# USB device driver (CH592, CH584/CH585).
+embassy-usb-driver = { version = "0.2.2", optional = true }
 
 # Embassy time driver support. Optional so a bare-metal user does not pull in
 # the executor/time stack.
@@ -88,8 +90,8 @@ ch592a = ["ch5xx-metapac/ch592", "_v4c"]
 ch592d = ["ch5xx-metapac/ch592", "_v4c"]
 
 # The QingKe cores, selected by the part features.
-_v3c = ["qingke-rt?/v3c", "qingke/v3c"]
-_v4c = ["qingke-rt?/v4c", "qingke/v4c"]
+_v3c = ["qingke-rt?/v3c", "qingke/v3c", "dep:embassy-usb-driver"]
+_v4c = ["qingke-rt?/v4c", "qingke/v4c", "dep:embassy-usb-driver"]
 
 ## Embassy support. This only pulls the deps in; pick a driver with one of the
 ## `time-driver-*` features below.
