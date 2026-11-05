@@ -90,6 +90,8 @@ pub(crate) mod _generated {
 
 pub use crate::_generated::{peripherals, Peripherals};
 
+pub(crate) mod sys;
+
 pub mod delay;
 pub mod dma;
 pub mod gpio;
