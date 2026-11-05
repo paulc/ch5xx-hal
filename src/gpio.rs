@@ -65,6 +65,27 @@ impl From<Level> for bool {
     }
 }
 
+/// How a pin is set up for a peripheral signal.
+///
+/// CH5xx has no alternate-function mux per pin: an enabled peripheral takes
+/// over the pin, and the GPIO registers only set direction, pull and drive. So
+/// this is just the GPIO side of the signal (an output drives, an input pulls).
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+pub(crate) enum AfType {
+    Input(Pull),
+    Output(Speed),
+}
+
+impl AfType {
+    pub(crate) const fn input(pull: Pull) -> Self {
+        Self::Input(pull)
+    }
+
+    pub(crate) const fn output(speed: Speed) -> Self {
+        Self::Output(speed)
+    }
+}
+
 /// Which physical port a pin lives on.
 ///
 /// The CH5xx exposes `PA` and `PB` as register groups, so this is the
@@ -197,6 +218,37 @@ pub(crate) trait SealedPin {
                 .pb_pd_drv()
                 .modify(|w| w.set_pb_pd_drv(n, matches!(pull, Pull::Down))),
         }
+    }
+
+    /// Hand the pin to a peripheral signal.
+    #[inline]
+    fn set_as_af(&self, af: AfType) {
+        critical_section::with(|_| match af {
+            AfType::Input(pull) => {
+                self.set_direction(false);
+                self.set_pull(pull);
+                #[cfg(any(sys_ch592, sys_ch585))]
+                self.set_digital_input(true);
+            }
+            AfType::Output(speed) => {
+                // Idle high, like the UART/SPI idle level, until the
+                // peripheral drives it.
+                self.set_high();
+                self.set_speed(speed);
+                self.set_direction(true);
+            }
+        })
+    }
+
+    /// Return the pin to a floating input, its reset state.
+    #[inline]
+    fn set_as_disconnected(&self) {
+        critical_section::with(|_| {
+            self.set_direction(false);
+            self.set_pull(Pull::None);
+            #[cfg(any(sys_ch592, sys_ch585))]
+            self.set_digital_input(true);
+        })
     }
 
     /// Make the pin an analog input: floating, with its digital input off
