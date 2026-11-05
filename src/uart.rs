@@ -403,6 +403,14 @@ impl<'d, T: Instance, M: Mode> UartTx<'d, T, M> {
         Ok(())
     }
 
+    /// Change the baud rate and frame format, keeping the pins and remap.
+    ///
+    /// Waits for the transmitter to drain first, so queued bytes go out at
+    /// the old settings.
+    pub fn set_config(&mut self, config: &Config) -> Result<(), ConfigError> {
+        reconfigure::<T>(config)
+    }
+
     fn new_inner(tx: Peri<'d, AnyPin>) -> Self {
         T::state().owners.fetch_add(1, Ordering::Relaxed);
         Self {
@@ -510,6 +518,18 @@ impl<'d, T: Instance, M: Mode> UartRx<'d, T, M> {
     /// reports the error on the next call, so the valid prefix is not lost.
     pub fn blocking_read_some(&mut self, buffer: &mut [u8]) -> Result<usize, Error> {
         read_blocking::<T>(buffer, false)
+    }
+
+    /// Read one byte if one is waiting, else `WouldBlock`.
+    pub fn nb_read(&mut self) -> Result<u8, nb::Error<Error>> {
+        nb_read::<T>()
+    }
+
+    /// Change the baud rate and frame format, keeping the pins and remap.
+    ///
+    /// This also changes the transmit side of the same instance.
+    pub fn set_config(&mut self, config: &Config) -> Result<(), ConfigError> {
+        reconfigure::<T>(config)
     }
 
     fn new_inner(rx: Peri<'d, AnyPin>) -> Self {
@@ -621,6 +641,19 @@ impl<'d, T: Instance, M: Mode> Uart<'d, T, M> {
     /// Read whatever is available, blocking only for the first byte.
     pub fn blocking_read_some(&mut self, buffer: &mut [u8]) -> Result<usize, Error> {
         self.rx.blocking_read_some(buffer)
+    }
+
+    /// Read one byte if one is waiting, else `WouldBlock`.
+    pub fn nb_read(&mut self) -> Result<u8, nb::Error<Error>> {
+        nb_read::<T>()
+    }
+
+    /// Change the baud rate and frame format, keeping the pins and remap.
+    ///
+    /// Waits for the transmitter to drain first, so queued bytes go out at
+    /// the old settings.
+    pub fn set_config(&mut self, config: &Config) -> Result<(), ConfigError> {
+        reconfigure::<T>(config)
     }
 
     /// Split into independent transmitter and receiver halves.
@@ -799,6 +832,71 @@ impl<T: Instance, M: Mode> embedded_io::WriteReady for Uart<'_, T, M> {
 impl<T: Instance, M: Mode> embedded_io::WriteReady for UartTx<'_, T, M> {
     fn write_ready(&mut self) -> Result<bool, Self::Error> {
         Ok(T::regs().tfc().read().tfc() < 8)
+    }
+}
+
+impl embedded_hal_nb::serial::Error for Error {
+    fn kind(&self) -> embedded_hal_nb::serial::ErrorKind {
+        match self {
+            Error::Framing => embedded_hal_nb::serial::ErrorKind::FrameFormat,
+            Error::Overrun => embedded_hal_nb::serial::ErrorKind::Overrun,
+            Error::Parity => embedded_hal_nb::serial::ErrorKind::Parity,
+            Error::Break => embedded_hal_nb::serial::ErrorKind::Other,
+        }
+    }
+}
+
+impl<T: Instance, M: Mode> embedded_hal_nb::serial::ErrorType for Uart<'_, T, M> {
+    type Error = Error;
+}
+
+impl<T: Instance, M: Mode> embedded_hal_nb::serial::ErrorType for UartTx<'_, T, M> {
+    type Error = Error;
+}
+
+impl<T: Instance, M: Mode> embedded_hal_nb::serial::ErrorType for UartRx<'_, T, M> {
+    type Error = Error;
+}
+
+impl<T: Instance, M: Mode> embedded_hal_nb::serial::Read for Uart<'_, T, M> {
+    fn read(&mut self) -> nb::Result<u8, Self::Error> {
+        nb_read::<T>()
+    }
+}
+
+impl<T: Instance, M: Mode> embedded_hal_nb::serial::Read for UartRx<'_, T, M> {
+    fn read(&mut self) -> nb::Result<u8, Self::Error> {
+        nb_read::<T>()
+    }
+}
+
+impl<T: Instance, M: Mode> embedded_hal_nb::serial::Write for Uart<'_, T, M> {
+    fn write(&mut self, word: u8) -> nb::Result<(), Self::Error> {
+        embedded_hal_nb::serial::Write::write(&mut self.tx, word)
+    }
+
+    fn flush(&mut self) -> nb::Result<(), Self::Error> {
+        embedded_hal_nb::serial::Write::flush(&mut self.tx)
+    }
+}
+
+impl<T: Instance, M: Mode> embedded_hal_nb::serial::Write for UartTx<'_, T, M> {
+    fn write(&mut self, word: u8) -> nb::Result<(), Self::Error> {
+        let r = T::regs();
+        if r.tfc().read().tfc() < 8 {
+            r.thr().write(|w| w.set_thr(word));
+            Ok(())
+        } else {
+            Err(nb::Error::WouldBlock)
+        }
+    }
+
+    fn flush(&mut self) -> nb::Result<(), Self::Error> {
+        if read_lsr_for_tx::<T>().lsr_tx_all_emp() {
+            Ok(())
+        } else {
+            Err(nb::Error::WouldBlock)
+        }
     }
 }
 
@@ -1096,10 +1194,10 @@ fn read_lsr_for_tx<T: Instance>() -> pac::uart::regs::Lsr {
     lsr
 }
 
-fn configure<T: Instance, const REMAP: u8>(config: &Config, enable_tx: bool) -> Result<(), ConfigError> {
+/// The baud divisor for `config`, validated.
+fn divisor<T: Instance>(config: &Config) -> Result<u16, ConfigError> {
     // DIV = 1, so DL = Fsys / (8 * baud), rounded to the nearest integer.
     // The datasheet's reference clock is Fsys * 2 / DIV divided by 16 * DL.
-    // Validate before touching the mux or resetting a working peripheral.
     let baud = config.baudrate as u64;
     if baud == 0 {
         return Err(ConfigError::BaudrateTooHigh);
@@ -1112,6 +1210,57 @@ fn configure<T: Instance, const REMAP: u8>(config: &Config, enable_tx: bool) -> 
     if dl > u16::MAX as u64 {
         return Err(ConfigError::BaudrateTooLow);
     }
+    Ok(dl as u16)
+}
+
+/// Write the frame format and baud divisor.
+fn set_frame<T: Instance>(config: &Config, dl: u16) {
+    let r = T::regs();
+    let (par_en, par_mod) = match config.parity {
+        Parity::None => (false, 0),
+        Parity::Odd => (true, 0b00),
+        Parity::Even => (true, 0b01),
+        Parity::Mark => (true, 0b10),
+        Parity::Space => (true, 0b11),
+    };
+    r.lcr().write(|w| {
+        w.set_lcr_word_sz(config.data_bits as u8);
+        w.set_lcr_stop_bit(config.stop_bits as u8 != 0);
+        w.set_lcr_par_en(par_en);
+        w.set_lcr_par_mod(par_mod);
+    });
+
+    r.div().write(|w| w.set_div(1));
+    r.dl().write(|w| w.set_dl(dl));
+}
+
+/// Change the frame format and baud rate of a running UART, without a reset.
+fn reconfigure<T: Instance>(config: &Config) -> Result<(), ConfigError> {
+    let dl = divisor::<T>(config)?;
+    while !read_lsr_for_tx::<T>().lsr_tx_all_emp() {}
+    set_frame::<T>(config, dl);
+    Ok(())
+}
+
+fn nb_read<T: Instance>() -> Result<u8, nb::Error<Error>> {
+    if let Some(error) = take_rx_error::<T>() {
+        return Err(nb::Error::Other(error));
+    }
+    let r = T::regs();
+    let lsr = r.lsr().read();
+    if let Some(error) = lsr_error(lsr) {
+        return Err(nb::Error::Other(error));
+    }
+    if lsr.lsr_data_rdy() {
+        Ok(r.rbr().read().rbr())
+    } else {
+        Err(nb::Error::WouldBlock)
+    }
+}
+
+fn configure<T: Instance, const REMAP: u8>(config: &Config, enable_tx: bool) -> Result<(), ConfigError> {
+    // Validate before touching the mux or resetting a working peripheral.
+    let dl = divisor::<T>(config)?;
 
     critical_section::with(|_| unsafe { T::set_remap(REMAP != 0) });
     T::state().rx_error.store(0, Ordering::Relaxed);
@@ -1132,22 +1281,7 @@ fn configure<T: Instance, const REMAP: u8>(config: &Config, enable_tx: bool) -> 
         w.set_fcr_fifo_trig(0);
     });
 
-    let (par_en, par_mod) = match config.parity {
-        Parity::None => (false, 0),
-        Parity::Odd => (true, 0b00),
-        Parity::Even => (true, 0b01),
-        Parity::Mark => (true, 0b10),
-        Parity::Space => (true, 0b11),
-    };
-    r.lcr().write(|w| {
-        w.set_lcr_word_sz(config.data_bits as u8);
-        w.set_lcr_stop_bit(config.stop_bits as u8 != 0);
-        w.set_lcr_par_en(par_en);
-        w.set_lcr_par_mod(par_mod);
-    });
-
-    r.div().write(|w| w.set_div(1));
-    r.dl().write(|w| w.set_dl(dl as u16));
+    set_frame::<T>(config, dl);
 
     Ok(())
 }
