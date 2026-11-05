@@ -119,6 +119,28 @@ pub(crate) unsafe fn init() {
     measure();
 }
 
+/// A free-running tick count for driver timeouts, at [`ticks_per_sec`]: the
+/// SysTick counter, or the embassy timebase under `time-driver-systick`,
+/// which reloads SysTick. Compare two readings with `wrapping_sub`.
+#[allow(unused)]
+#[inline]
+pub(crate) fn ticks() -> u32 {
+    #[cfg(not(feature = "time-driver-systick"))]
+    return SYSTICK.stk_cntl().read().cntl();
+    #[cfg(feature = "time-driver-systick")]
+    return embassy_time_driver::now() as u32;
+}
+
+/// The rate of [`ticks`].
+#[allow(unused)]
+#[inline]
+pub(crate) fn ticks_per_sec() -> u32 {
+    #[cfg(not(feature = "time-driver-systick"))]
+    return TICKS_PER_SEC.load(Ordering::Relaxed);
+    #[cfg(feature = "time-driver-systick")]
+    return embassy_time_driver::TICK_HZ as u32;
+}
+
 /// Re-measure the SysTick rate after [`crate::rcc::set_config`] changed `Fsys`,
 /// or after the 32 kHz clock was switched to the crystal (see the module docs:
 /// with the 32 kHz RC this takes the nominal rate).
