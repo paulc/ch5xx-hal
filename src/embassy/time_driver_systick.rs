@@ -76,6 +76,11 @@ impl ReloadTimer for SystickTimer {
     fn clear_flag(&self) {
         SYSTICK.stk_sr().modify(|w| w.set_cntif(false));
     }
+
+    #[inline]
+    fn pending(&self) -> bool {
+        SYSTICK.stk_sr().read().cntif()
+    }
 }
 
 struct Driver {
@@ -146,10 +151,11 @@ pub(crate) fn set_count(cs: critical_section::CriticalSection, cnt: u64) {
 fn SysTick() {
     let stk = &SYSTICK;
     if !stk.stk_sr().read().cntif() {
-        // Not ours. Leaving `CNTIF` alone; there is nothing else to service.
+        // Not ours, or `arm` already counted the reload.
         return;
     }
-    stk.stk_sr().modify(|w| w.set_cntif(false));
+    // `on_period` clears `CNTIF`, in the critical section, as it counts the
+    // period.
 
     critical_section::with(|cs| {
         DRIVER.state.on_period(cs, &DRIVER.timer);

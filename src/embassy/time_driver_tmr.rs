@@ -112,6 +112,11 @@ impl ReloadTimer for TmrTimer {
         // `INT_FLAG` is RW1: writing 1 clears the bit.
         tmr().int_flag().write(|w| w.set_if_cyc_end(true));
     }
+
+    #[inline]
+    fn pending(&self) -> bool {
+        tmr().int_flag().read().if_cyc_end()
+    }
 }
 
 struct Driver {
@@ -159,10 +164,11 @@ tmr_irq! {
 
 fn on_interrupt() {
     if !tmr().int_flag().read().if_cyc_end() {
-        // Not ours. Leaving the flag alone; there is nothing else to service.
+        // Not ours, or `arm` already counted the reload.
         return;
     }
-    tmr().int_flag().write(|w| w.set_if_cyc_end(true));
+    // `on_period` clears the flag, in the critical section, as it counts the
+    // period.
 
     critical_section::with(|cs| {
         DRIVER.state.on_period(cs, &DRIVER.timer);

@@ -46,6 +46,10 @@ pub(crate) trait ReloadTimer {
 
     /// Clear the period-end interrupt flag.
     fn clear_flag(&self);
+
+    /// Whether the period-end flag is set: the counter has reloaded since
+    /// the flag was last cleared.
+    fn pending(&self) -> bool;
 }
 
 /// The parts of a time driver that do not depend on which counter is used.
@@ -76,12 +80,33 @@ impl ReloadState {
 
     /// 64-bit counter tick count, with the pair read atomically.
     ///
-    /// Interrupts must be disabled: the period interrupt writes `high` and
-    /// reloads the counter together, and reading across that boundary would
-    /// combine a new `high` with an old (or reloaded) counter.
+    /// Interrupts must be disabled, so the period interrupt cannot move
+    /// `high` under the read. The hardware still reloads the counter inside
+    /// a critical section, though: a reload whose interrupt has not run yet
+    /// shows as the flag, and its period is counted here.
     #[inline]
     pub(crate) fn ticks_locked<T: ReloadTimer>(&self, cs: CriticalSection, t: &T) -> u64 {
-        self.high.borrow(cs).get() + (t.count() & T::MASK) as u64
+        let high = self.high.borrow(cs).get();
+        let count = t.count() & T::MASK;
+        if t.pending() {
+            // Reloaded, before or after `count` was read: read it again.
+            high + self.period.borrow(cs).get() as u64 + (t.count() & T::MASK) as u64
+        } else {
+            high + count as u64
+        }
+    }
+
+    /// Account a reload whose interrupt has not run yet: advance `high` by
+    /// the period that ended and clear the flag. Every flag is a reload, so
+    /// a flag may only be cleared here, with its period counted; clearing
+    /// it anywhere else loses a period of time.
+    #[inline]
+    fn catch_up<T: ReloadTimer>(&self, cs: CriticalSection, t: &T) {
+        if t.pending() {
+            t.clear_flag();
+            let high = self.high.borrow(cs).get() + self.period.borrow(cs).get() as u64;
+            self.high.borrow(cs).set(high);
+        }
     }
 
     #[inline]
@@ -115,14 +140,20 @@ impl ReloadState {
     ///
     /// `at` is the queue's next expiration, or [`u64::MAX`] when it is empty.
     pub(crate) fn arm<T: ReloadTimer>(&self, cs: CriticalSection, t: &T, at: u64) -> bool {
+        self.catch_up(cs, t);
         let base = self.high.borrow(cs).get();
         // Re-read the counter here: waking the timers between computing `at`
         // and writing the end value takes long enough to move it.
         let cnt = t.count() & T::MASK;
         let (base, period) = super::reload_math::rearm(base, cnt, at, T::MAX_PERIOD, T::MASK, T::RESETS_ON_SET_END);
 
-        t.clear_flag();
         t.set_end(period - 1);
+        if t.pending() {
+            // The counter reached the old end before the write. Count that
+            // period (still the old one) and let the caller retry.
+            self.catch_up(cs, t);
+            return false;
+        }
         // A reset-on-write backend needs a new origin as well as a relative
         // period, otherwise every rearm discards time already spent counting.
         self.high.borrow(cs).set(base);
@@ -144,15 +175,14 @@ impl ReloadState {
         }
     }
 
-    /// Advance across a completed period and re-arm. Called from the interrupt.
+    /// Advance across a completed period and re-arm. Called from the
+    /// interrupt, which leaves the flag to this.
     pub(crate) fn on_period<T: ReloadTimer>(&self, cs: CriticalSection, t: &T) {
         // The hardware reloaded the counter at the end value, so the high part
         // advances by exactly the programmed period regardless of how late the
-        // interrupt was taken.
-        let period = self.period.borrow(cs).get();
-        let high = self.high.borrow(cs).get() + period as u64;
-        self.high.borrow(cs).set(high);
-
+        // interrupt was taken. `arm` may have counted it already, in a
+        // critical section the interrupt waited for; then this only re-arms.
+        self.catch_up(cs, t);
         self.trigger_alarm(cs, t);
     }
 
