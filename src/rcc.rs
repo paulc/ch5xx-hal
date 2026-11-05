@@ -45,13 +45,25 @@
 //! `*_HSE_PLL_*` need the board's 32 MHz crystal; the reference board uses
 //! 18 pF load capacitors, which is what the presets select.
 //!
-//! # Safe access
+//! # Safe access and the switch itself
 //!
 //! The clock and oscillator registers are RWA. Entering SAM means writing
-//! `0x57` then `0xA8` to `SAFE_ACCESS_SIG`; the window lasts ~112 `Tsys` and
-//! closes itself (0x00 closes it early). [`set_config`] masks interrupts around
-//! every window so a handler cannot consume it, and reads `CLK_CFG` back to
-//! prove the write landed.
+//! `0x57` then `0xA8` to `SAFE_ACCESS_SIG`; 0x00 closes the window. On CH585 it
+//! otherwise closes by itself after about 16 cycles, so the switch clears
+//! `SAFE_AUTO_EN` to keep it open, as WCH's `SetSysClock` does.
+//!
+//! [`set_config`] follows `SetSysClock` step for step, from RAM with
+//! interrupts masked: it starts the crystal if it is off, powers the PLL when
+//! the flash controller (XROM) is to be clocked from it, sets the flash
+//! timing (`FLASH_SCK`, `FLASH_CFG`) for the new divider, and passes through the
+//! 32 kHz mode on the way to the new `CLK_CFG`. Running from RAM keeps
+//! instruction fetch out of the flash while its clock and timing change. It
+//! then reads `CLK_CFG` back to prove the write landed.
+//!
+//! A debugger attach can change the clock: wlink sets `CLK_CFG` to `0x014D`
+//! (HSI PLL / 13 = 24 MHz) when it connects to a CH585. A program that a
+//! debugger reset is unaffected, since [`init`](crate::init) runs after the
+//! reset.
 //!
 //! # Frequencies
 //!
@@ -67,6 +79,7 @@
 
 use crate::atomic::{AtomicU32, Ordering};
 use crate::pac;
+use crate::sys::safe_access;
 use crate::time::Hertz;
 
 /// Starting value for the cache, until [`set_config`] runs.
@@ -75,10 +88,6 @@ use crate::time::Hertz;
 pub const DEFAULT_FREQUENCY: Hertz = Hertz(5_333_333);
 
 static SYSCLK_HZ: AtomicU32 = AtomicU32::new(DEFAULT_FREQUENCY.0);
-
-const SAFE_ACCESS_SIG1: u8 = 0x57;
-const SAFE_ACCESS_SIG2: u8 = 0xA8;
-const SAFE_ACCESS_SIG0: u8 = 0x00;
 
 /// Oscillator at the root of the clock tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -419,9 +428,10 @@ pub fn clocks() -> Clocks {
 /// for busy-waits, the embassy time driver (only during a fresh startup), UART
 /// dividers, and any other peripheral configured from [`clocks`].
 ///
-/// The HSE is expected to be running already: reset powers it and this
-/// function does not wait for a cold crystal start. It only asserts the power
-/// bit and selects the source.
+/// A crystal that is off is started at full bias first, as `SetSysClock`
+/// does; reset leaves it running. The oscillator not selected is left
+/// running too: `SetSysClock` stops it, but the 2-wire debug interface needs
+/// HSI.
 ///
 /// # Panics
 ///
@@ -462,21 +472,6 @@ pub unsafe fn set_config(config: Config) -> Clocks {
     // while `Fsys` itself comes from the PLL.
     let pll_gate_diss = before.osc32m_sel() != osc32m_sel;
 
-    // Power the oscillators this configuration needs. Reset leaves HSI, HSE
-    // and the PLL powered, so in the normal path this only re-asserts bits
-    // that are already set.
-    safe_access(|| {
-        pac::SYS.hfck_pwr_ctrl().modify(|w| {
-            match config.osc {
-                Osc::Hsi16 => w.set_clk_rc16m_pon(true),
-                Osc::Hse32 => w.set_clk_xt32m_pon(true),
-            }
-            if matches!(config.sys, Sys::Pll(_)) {
-                w.set_clk_pll_pon(true);
-            }
-        });
-    });
-
     if osc32m_sel {
         safe_access(|| {
             pac::SYSTEM_CONTROL
@@ -485,16 +480,14 @@ pub unsafe fn set_config(config: Config) -> Clocks {
         });
     }
 
-    safe_access(|| {
-        pac::SYS.clk_cfg().write(|w| {
-            w.set_clk_pll_div(div);
-            w.set_clk_sys_mod(sys_mod);
-            w.set_xrom_sclk_sel(xrom_sclk);
-            w.set_osc32m_sel(osc32m_sel);
-            w.set_pll_gate_diss(pll_gate_diss);
-            w.set_pll_gate_time(false);
-        });
-    });
+    let mut cfg = pac::sys::regs::ClkCfg::default();
+    cfg.set_clk_pll_div(div);
+    cfg.set_clk_sys_mod(sys_mod);
+    cfg.set_xrom_sclk_sel(xrom_sclk);
+    cfg.set_osc32m_sel(osc32m_sel);
+    cfg.set_pll_gate_diss(pll_gate_diss);
+    cfg.set_pll_gate_time(false);
+    critical_section::with(|_| unsafe { set_sysclk_ram(cfg.0) });
 
     // The oscillator multiplexer needs 1 us to settle after OSC32M_SEL changes
     // (datasheet 6.3). No timer is available at this point, so spin a fixed
@@ -506,7 +499,8 @@ pub unsafe fn set_config(config: Config) -> Clocks {
     // A SAM window that expired early drops the write silently, so prove it.
     let after = pac::SYS.clk_cfg().read();
     assert_eq!(after.clk_sys_mod(), sys_mod, "rcc: CLK_SYS_MOD did not stick");
-    assert_eq!(after.clk_pll_div(), div, "rcc: CLK_PLL_DIV did not stick");
+    // The 5-bit field encodes 32 as 0.
+    assert_eq!(after.clk_pll_div(), div & 0x1f, "rcc: CLK_PLL_DIV did not stick");
     assert_eq!(after.osc32m_sel(), osc32m_sel, "rcc: OSC32M_SEL did not stick");
     assert_eq!(after.xrom_sclk_sel(), xrom_sclk, "rcc: XROM_SCLK_SEL did not stick");
 
@@ -530,19 +524,98 @@ fn validate(config: &Config) {
     }
 }
 
-/// Run `f` inside a safe-access window.
+const SAFE_MODE_CTRL: *mut u8 = 0x4000_1010 as *mut u8;
+const SAFE_ACCESS_SIG: *mut u8 = 0x4000_1040 as *mut u8;
+const CLK_SYS_CFG: *mut u16 = 0x4000_1008 as *mut u16;
+const HFCK_PWR_CTRL: *mut u8 = 0x4000_100a as *mut u8;
+const XT32M_TUNE: *mut u8 = 0x4000_104e as *mut u8;
+/// The flash controller's registers are not in the metapac yet.
+const FLASH_SCK: *mut u8 = 0x4000_1805 as *mut u8;
+const FLASH_CFG: *mut u8 = 0x4000_1807 as *mut u8;
+
+const RB_SAFE_AUTO_EN: u8 = 1 << 0;
+const RB_XROM_312M_SEL: u8 = 1 << 4;
+const RB_CLK_RC16M_PON: u8 = 1 << 1;
+const RB_CLK_XT32M_PON: u8 = 1 << 2;
+const RB_CLK_PLL_PON: u8 = 1 << 4;
+const RB_XROM_SCLK_SEL: u16 = 1 << 8;
+const RB_OSC32M_SEL: u16 = 1 << 9;
+
+/// Switch HCLK and the flash timing to `cfg` (a `CLK_CFG` value),
+/// following WCH's `SetSysClock` step for step.
 ///
-/// The window is ~112 `Tsys` long and must not lose those cycles to an
-/// interrupt, or the write it protects is dropped; hence the critical section.
-/// Closing the window early (0x00) keeps it from leaking into later, unrelated
-/// register writes.
-fn safe_access<R>(f: impl FnOnce() -> R) -> R {
-    critical_section::with(|_| {
-        let sig = pac::SYSTEM_CONTROL.safe_access_sig();
-        sig.write(|w| w.set_safe_access_sig(SAFE_ACCESS_SIG1));
-        sig.write(|w| w.set_safe_access_sig(SAFE_ACCESS_SIG2));
-        let result = f();
-        sig.write(|w| w.set_safe_access_sig(SAFE_ACCESS_SIG0));
-        result
-    })
+/// Lives in RAM (`.data` is copied there at startup), like the SDK's
+/// `__HIGH_CODE` version, because it changes the flash access timing
+/// while the clock moves under it. It must therefore not call anything
+/// in flash: raw register pokes only. Run with interrupts disabled.
+#[inline(never)]
+#[unsafe(link_section = ".data.ch5xx_hal.rcc.set_sysclk")]
+unsafe fn set_sysclk_ram(cfg: u16) {
+    use core::ptr::{read_volatile as rd, write_volatile as wr};
+
+    unsafe {
+        // Flash clocked at 312 MHz, not 624 MHz, from the PLL. Safe mode
+        // closes by itself after about 16 cycles unless `SAFE_AUTO_EN` is
+        // cleared, far too soon for this sequence; keep it open until the
+        // signature is cleared.
+        wr(SAFE_MODE_CTRL, rd(SAFE_MODE_CTRL) | RB_XROM_312M_SEL);
+        wr(SAFE_MODE_CTRL, rd(SAFE_MODE_CTRL) & !RB_SAFE_AUTO_EN);
+        core::arch::asm!("fence.i");
+        wr(SAFE_ACCESS_SIG, 0x57);
+        wr(SAFE_ACCESS_SIG, 0xa8);
+        core::arch::asm!("fence.i");
+
+        if cfg & RB_OSC32M_SEL != 0 {
+            if rd(HFCK_PWR_CTRL) & RB_CLK_XT32M_PON == 0 {
+                // Start the crystal at full bias, and give it time by
+                // running from the 32 kHz clock for a few cycles.
+                let tune = rd(XT32M_TUNE);
+                wr(XT32M_TUNE, tune | 0x03);
+                wr(HFCK_PWR_CTRL, rd(HFCK_PWR_CTRL) | RB_CLK_XT32M_PON);
+                let old = rd(CLK_SYS_CFG);
+                wr(CLK_SYS_CFG, old | 0xc0);
+                core::arch::asm!("nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop");
+                wr(CLK_SYS_CFG, old);
+                wr(XT32M_TUNE, tune);
+            }
+        } else {
+            wr(HFCK_PWR_CTRL, rd(HFCK_PWR_CTRL) | RB_CLK_RC16M_PON);
+        }
+
+        let div = cfg & 0x1f;
+        let sck = rd(FLASH_SCK) & !(1 << 4);
+        if cfg & RB_XROM_SCLK_SEL != 0 {
+            wr(HFCK_PWR_CTRL, rd(HFCK_PWR_CTRL) | RB_CLK_PLL_PON);
+            let flash_cfg = match div {
+                0 => {
+                    wr(FLASH_SCK, sck | (1 << 4));
+                    0x07
+                }
+                1..=9 => {
+                    wr(FLASH_SCK, sck);
+                    0x01
+                }
+                10..=15 => {
+                    wr(FLASH_SCK, sck);
+                    0x02
+                }
+                _ => {
+                    wr(FLASH_SCK, sck);
+                    0x07
+                }
+            };
+            wr(FLASH_CFG, flash_cfg);
+        } else {
+            wr(FLASH_SCK, sck);
+            wr(FLASH_CFG, if div < 8 { 0x51 } else { 0x57 });
+        }
+
+        // Through the 32 kHz mode, as `SetSysClock` does.
+        wr(CLK_SYS_CFG, cfg | 0xc0);
+        wr(CLK_SYS_CFG, cfg);
+
+        wr(SAFE_MODE_CTRL, rd(SAFE_MODE_CTRL) | RB_SAFE_AUTO_EN);
+        wr(SAFE_ACCESS_SIG, 0);
+        core::arch::asm!("fence.i");
+    }
 }
