@@ -1,0 +1,38 @@
+[package]
+name = "ch584-ble-examples"
+version = "0.1.0"
+edition = "2021"
+
+# BLE examples, apart from ../ch584 because they run on the HAL's low-power
+# executor (`ch5xx_hal::embassy::Executor`), which cannot share a build with
+# embassy-executor's `platform-*` executors.
+
+[dependencies]
+ch5xx-hal = { path = "../../", features = ["ch584f", "rt", "memory-x", "time-driver-systick", "highcode", "ble", "executor"] }
+
+panic-halt = "1.0"
+
+embassy-executor = { version = "0.10.0" }
+embassy-futures = "0.1.2"
+embassy-sync = "0.8.0"
+embassy-time = "0.5.1"
+
+qingke = "0.8.3"
+qingke-rt = "0.8.3"
+
+[features]
+## `ble_adv`, `ble_peripheral`: advertise every second (not every 100 ms /
+## 50 ms).
+adv-1s = []
+## `ble_adv`, `ble_peripheral`: no UART log (PB7 gets a pull-up like the
+## other spare pins).
+quiet = []
+
+[profile.release]
+strip = false   # symbols are not flashed to the microcontroller, so don't strip them.
+debug = 2
+lto = true
+opt-level = "s"
+
+[profile.dev]
+overflow-checks = false
