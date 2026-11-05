@@ -1,0 +1,33 @@
+[package]
+name = "ch584-examples"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ch5xx-hal = { path = "../../", features = ["ch584f", "rt", "memory-x", "time-driver-systick"] }
+
+panic-halt = "1.0"
+embedded-hal = "1.0.0"
+
+embassy-executor = { version = "0.10.0", features = ["executor-thread"] }
+embassy-time = "0.5.1"
+
+qingke = "0.8.3"
+qingke-rt = "0.8.3"
+
+[features]
+default = ["platform-spin"]
+## The embassy executor busy-polls (never sleeps).
+platform-spin = ["embassy-executor/platform-spin"]
+## The embassy executor sleeps in WFI between polls. Build with
+## `--no-default-features --features platform-riscv32`.
+platform-riscv32 = ["embassy-executor/platform-riscv32"]
+
+[profile.release]
+strip = false   # symbols are not flashed to the microcontroller, so don't strip them.
+debug = 2
+lto = true
+opt-level = "s"
+
+[profile.dev]
+overflow-checks = false
