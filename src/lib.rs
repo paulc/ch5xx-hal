@@ -105,6 +105,8 @@ pub mod i2c;
 pub mod spi;
 pub mod timer;
 pub mod uart;
+#[cfg(any(sys_ch592, sys_ch585))]
+pub mod wdg;
 
 /// Embassy integration (time driver). Requires the `embassy` feature.
 #[cfg(feature = "embassy")]

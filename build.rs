@@ -166,6 +166,13 @@ fn main() {
         singletons.push(name);
     }
 
+    // Blocks without a peripheral entry of their own in the metadata, which
+    // drivers still take as a singleton: the independent watchdog is two
+    // registers at the start of `SYS`.
+    if block_cfgs.contains("sys_ch592") || block_cfgs.contains("sys_ch585") {
+        singletons.push("IWDG".to_string());
+    }
+
     // One singleton per pin.
     let mut pins: Vec<(String, char, u8, u8)> = Vec::new();
     for (port, bonded) in ports {
