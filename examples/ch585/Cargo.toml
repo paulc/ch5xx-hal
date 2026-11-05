@@ -15,7 +15,7 @@ time-driver-tmr2 = ["ch5xx-hal/time-driver-tmr2"]
 time-driver-tmr3 = ["ch5xx-hal/time-driver-tmr3"]
 
 [dependencies]
-ch5xx-hal = { path = "../../", features = ["ch585", "rt", "memory-x"] }
+ch5xx-hal = { path = "../../", features = ["ch585m", "rt", "memory-x"] }
 
 panic-halt = "1.0"
 embedded-hal = "1.0.0"

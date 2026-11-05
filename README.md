@@ -15,7 +15,9 @@ Embassy support.
 | --- | --- | --- |
 | CH585 | QingKe V3C | GPIO, clocks, UART, and Embassy time drivers tested on hardware |
 
-Select exactly one chip feature, currently `ch585`. Register access comes from
+Select exactly one part feature: `ch584m`, `ch584x`, `ch584f`, `ch585m`,
+`ch585f`, `ch585c` or `ch585d`. The package decides which pins exist: only
+bonded pins get a singleton. Register access comes from
 [`ch5xx-metapac`](https://github.com/ch32-rs/ch5xx-data), allowing shared driver
 code across chips with compatible peripherals.
 

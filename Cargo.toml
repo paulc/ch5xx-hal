@@ -57,11 +57,28 @@ ch5xx-metapac = { path = "../ch5xx-data/build/ch5xx-metapac", default-features =
 
 [features]
 default = ["rt"]
-rt = ["dep:qingke-rt", "qingke-rt/v3c", "qingke/v3c"]
+rt = ["dep:qingke-rt"]
 
-# Chip-selection features. Exactly one must be enabled; `ch5xx-metapac` panics
-# otherwise. All of these cores are QingKe V3C on the parts covered so far.
-ch585 = ["ch5xx-metapac/ch585"]
+# Part-selection features, one per part number as in ch32-hal. Exactly one
+# must be enabled. A part selects its die in `ch5xx-metapac` and its QingKe
+# core; the package decides which pins get singletons (see build.rs).
+## CH584M, QFN48.
+ch584m = ["ch5xx-metapac/ch584", "_v3c"]
+## CH584X, QFN48, 512 KB flash.
+ch584x = ["ch5xx-metapac/ch584x", "_v3c"]
+## CH584F, QFN32.
+ch584f = ["ch5xx-metapac/ch584", "_v3c"]
+## CH585M, QFN48.
+ch585m = ["ch5xx-metapac/ch585", "_v3c"]
+## CH585F, QFN32.
+ch585f = ["ch5xx-metapac/ch585", "_v3c"]
+## CH585C, QFN26.
+ch585c = ["ch5xx-metapac/ch585", "_v3c"]
+## CH585D, QFN20.
+ch585d = ["ch5xx-metapac/ch585", "_v3c"]
+
+# The QingKe cores, selected by the part features.
+_v3c = ["qingke-rt?/v3c", "qingke/v3c"]
 
 ## Embassy support. This only pulls the deps in; pick a driver with one of the
 ## `time-driver-*` features below.

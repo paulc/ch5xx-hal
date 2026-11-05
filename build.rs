@@ -25,27 +25,70 @@ use quote::{format_ident, quote};
 fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
-    // Exactly one chip feature, e.g. `ch585`.
-    let chip_name = env::vars()
+    // Exactly one part feature, e.g. `ch584f`. Its die (`ch584`) and the part
+    // itself both become cfgs; drivers use the die, or better the block
+    // versions below.
+    let part = env::vars()
         .map(|(a, _)| a)
         .filter(|x| x.starts_with("CARGO_FEATURE_CH5"))
         .collect::<Vec<_>>();
-    let chip_name = match chip_name.len() {
-        0 => panic!("no ch5xx chip Cargo feature enabled (e.g. `ch585`)"),
-        1 => chip_name[0]
-            .strip_prefix("CARGO_FEATURE_")
-            .unwrap()
-            .to_ascii_lowercase(),
-        _ => panic!("multiple ch5xx chip Cargo features enabled; pick one"),
+    let part = match part.len() {
+        0 => panic!("no ch5xx part Cargo feature enabled (e.g. `ch584f`)"),
+        1 => part[0].strip_prefix("CARGO_FEATURE_").unwrap().to_ascii_lowercase(),
+        _ => panic!("multiple ch5xx part Cargo features enabled; pick one"),
+    };
+    let chip_name = match part.as_str() {
+        "ch584m" | "ch584x" | "ch584f" => "ch584",
+        "ch585m" | "ch585f" | "ch585c" | "ch585d" => "ch585",
+        other => panic!("unknown ch5xx part `{other}`"),
     };
     println!("cargo:rustc-cfg={chip_name}");
+    println!("cargo:rustc-cfg={part}");
 
-    // Per-chip GPIO port widths. Metadata only lists pins that carry a
+    // One cfg per register block version, e.g. `adc_ch592`, `sys_ch585`, as
+    // embassy-stm32 does (`adc_v3`): drivers gate on the block they program,
+    // not the chip, so chips sharing a block share the code. CH584 and CH585
+    // are one die and use the same blocks, for example.
+    let mut block_cfgs = BTreeSet::new();
+    for p in METADATA.peripherals {
+        if let Some(r) = &p.registers {
+            block_cfgs.insert(format!("{}_{}", r.kind, r.version));
+        }
+    }
+    for cfg in &block_cfgs {
+        println!("cargo:rustc-cfg={cfg}");
+    }
+
+    // Bonded GPIO pins per package, from the datasheets' pin definition
+    // tables (CH585/CH584 DS V1.6). Metadata only lists pins that carry a
     // peripheral signal, so pads with no alternate function would not be
-    // discovered; the widths differ per die and stay here.
-    let ports: &[(char, u8)] = match chip_name.as_str() {
-        "ch585" => &[('A', 16), ('B', 24)],
-        other => panic!("no GPIO port map for chip `{other}`"),
+    // discovered, and it does not say which pads a package bonds out. Only these pins get a singleton, and pin trait impls for
+    // any other pin are left out (`if_pin!`).
+    let ports: &[(char, &[u8])] = match part.as_str() {
+        // QFN48: all 40.
+        "ch584m" | "ch584x" | "ch585m" => &[
+            ('A', &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]),
+            (
+                'B',
+                &[
+                    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+                    22, 23,
+                ],
+            ),
+        ],
+        // QFN32: 24. PB9 shares PA9's pad (DS note 4), so only PA9 is listed.
+        "ch584f" | "ch585f" => &[
+            ('A', &[4, 5, 9, 10, 11, 12, 13, 14, 15]),
+            ('B', &[4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 22, 23]),
+        ],
+        // QFN26: 17, with PB9 again on PA9's pad.
+        "ch585c" => &[
+            ('A', &[9, 12, 13, 14, 15]),
+            ('B', &[4, 8, 10, 11, 12, 13, 14, 15, 16, 17, 22, 23]),
+        ],
+        // QFN20: 12.
+        "ch585d" => &[('A', &[9, 12, 13, 14, 15]), ('B', &[10, 11, 12, 13, 14, 15, 22])],
+        other => panic!("no pin list for part `{other}`"),
     };
 
     // A `time-driver-tmr*` feature takes that TMR for the timebase. Drop it from
@@ -82,8 +125,8 @@ fn main() {
 
     // One singleton per pin.
     let mut pins: Vec<(String, char, u8, u8)> = Vec::new();
-    for (port, width) in ports {
-        for n in 0..*width {
+    for (port, bonded) in ports {
+        for &n in *bonded {
             pins.push((format!("P{port}{n}"), *port, (*port as u8) - b'A', n));
         }
     }
@@ -171,6 +214,15 @@ fn main() {
 
     // ---- write ---------------------------------------------------------
     fs::write(out_dir.join("_generated.rs"), g.to_string()).unwrap();
+    // if_pin!(PA0, item): `item` if the part bonds PA0, else nothing. Drivers
+    // wrap their pin trait impls in it, so a package without a pin simply
+    // lacks the impl, as ch32-hal's generated impls do.
+    m.push_str("#[allow(unused_macros)]\nmacro_rules! if_pin {\n");
+    for (p, ..) in &pins {
+        writeln!(m, "    ({p}, $($t:tt)*) => {{ $($t)* }};").unwrap();
+    }
+    m.push_str("    ($p:ident, $($t:tt)*) => {};\n}\n");
+
     fs::write(out_dir.join("_macros.rs"), m).unwrap();
 
     println!("cargo:rerun-if-changed=build.rs");

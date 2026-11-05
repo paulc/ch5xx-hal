@@ -80,8 +80,10 @@ mod sealed {
 pub trait TimerPin<T: Instance, const REMAP: u8>: crate::gpio::Pin + sealed::Pin {}
 macro_rules! pin {
     ($tmr:ident, $remap:literal, $pin:ident) => {
-        impl sealed::Pin for peripherals::$pin {}
-        impl TimerPin<peripherals::$tmr, $remap> for peripherals::$pin {}
+        if_pin!($pin,
+            impl sealed::Pin for peripherals::$pin {}
+            impl TimerPin<peripherals::$tmr, $remap> for peripherals::$pin {}
+        );
     };
 }
 #[cfg(not(feature = "time-driver-tmr0"))]

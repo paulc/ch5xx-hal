@@ -333,12 +333,16 @@ pub trait RxPin<T: Instance, const REMAP: u8>: Pin + pin_sealed::Rx {}
 macro_rules! impl_pins {
     ($inst:ident, $remap:literal, rx: [$($rx:ident),* $(,)?], tx: [$($tx:ident),* $(,)?]) => {
         $(
-            impl pin_sealed::Rx for peripherals::$rx {}
-            impl RxPin<peripherals::$inst, $remap> for peripherals::$rx {}
+            if_pin!($rx,
+                impl pin_sealed::Rx for peripherals::$rx {}
+                impl RxPin<peripherals::$inst, $remap> for peripherals::$rx {}
+            );
         )*
         $(
-            impl pin_sealed::Tx for peripherals::$tx {}
-            impl TxPin<peripherals::$inst, $remap> for peripherals::$tx {}
+            if_pin!($tx,
+                impl pin_sealed::Tx for peripherals::$tx {}
+                impl TxPin<peripherals::$inst, $remap> for peripherals::$tx {}
+            );
         )*
     };
 }
