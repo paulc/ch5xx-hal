@@ -98,6 +98,22 @@ impl embassy_time_driver::Driver for Driver {
     }
 }
 
+/// Counter ticks (HCLK cycles) since [`init`], for [`crate::delay`].
+///
+/// The timebase without the conversion to embassy ticks: that takes 64-bit
+/// divisions, about 2000 cycles from flash on CH584 at 62.4 MHz, too slow
+/// to poll for microsecond delays.
+#[inline]
+pub(crate) fn ticks() -> u64 {
+    DRIVER.state.ticks(&DRIVER.timer)
+}
+
+/// The rate of [`ticks`].
+#[inline]
+pub(crate) fn ticks_per_sec() -> u32 {
+    DRIVER.state.hz.load(crate::atomic::Ordering::Relaxed)
+}
+
 /// Counter ticks since [`init`], for `ble::sleep`.
 #[cfg(all(feature = "executor", feature = "ble"))]
 pub(crate) fn count(cs: critical_section::CriticalSection) -> u64 {

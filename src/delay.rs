@@ -38,10 +38,12 @@
 //! it at a compare value it reprograms for every alarm, so a raw poll would
 //! measure an interval against a counter that restarts underneath it: measured
 //! on hardware with an alarm every 100 ms, `delay_ms(1000)` took **97 ms**.
-//! In that configuration [`Delay`] therefore reads the timebase through
-//! [`embassy_time_driver::now`] instead, which is monotonic by contract. The
-//! delay is no longer exactly calibrated — it is one embassy tick, rounded up —
-//! but it is correct, and that is the trade the feature makes.
+//! In that configuration [`Delay`] therefore reads the driver's 64-bit
+//! timebase instead, which is monotonic, in counter ticks at the nominal
+//! clock rate (not [`embassy_time_driver::now`]: its conversion to embassy
+//! ticks costs about 2000 cycles a call). The delay is then timed against the
+//! nominal rate rather than the measured one, but it is correct, and that is
+//! the trade the feature makes.
 //!
 //! Note that an executor that never sleeps hides the problem: `STK_CMPLR` stays
 //! at its initial `MAX_PERIOD - 1`, the counter never reaches it, and raw
@@ -120,15 +122,16 @@ pub(crate) unsafe fn init() {
 }
 
 /// A free-running tick count for driver timeouts, at [`ticks_per_sec`]: the
-/// SysTick counter, or the embassy timebase under `time-driver-systick`,
-/// which reloads SysTick. Compare two readings with `wrapping_sub`.
+/// SysTick counter, or under `time-driver-systick`, which reloads SysTick,
+/// the driver's timebase in counter ticks. Compare two readings with
+/// `wrapping_sub`.
 #[allow(unused)]
 #[inline]
 pub(crate) fn ticks() -> u32 {
     #[cfg(not(feature = "time-driver-systick"))]
     return SYSTICK.stk_cntl().read().cntl();
     #[cfg(feature = "time-driver-systick")]
-    return embassy_time_driver::now() as u32;
+    return crate::embassy::time_driver_impl::ticks() as u32;
 }
 
 /// The rate of [`ticks`].
@@ -138,7 +141,7 @@ pub(crate) fn ticks_per_sec() -> u32 {
     #[cfg(not(feature = "time-driver-systick"))]
     return TICKS_PER_SEC.load(Ordering::Relaxed);
     #[cfg(feature = "time-driver-systick")]
-    return embassy_time_driver::TICK_HZ as u32;
+    return crate::embassy::time_driver_impl::ticks_per_sec();
 }
 
 /// Re-measure the SysTick rate after [`crate::rcc::set_config`] changed `Fsys`,
@@ -218,27 +221,28 @@ impl Delay {
 }
 
 /// Under the SysTick time driver the counter is reloaded at the driver's
-/// compare value, so it cannot be polled. Read the driver's timebase instead.
-///
-/// It is monotonic, so it carries the delay forward correctly; it just costs
-/// one tick of resolution instead of a raw counter read.
+/// compare value, so it cannot be polled. Read the driver's timebase instead,
+/// in counter ticks: it is monotonic, so it carries the delay forward
+/// correctly. Not `embassy_time_driver::now`, whose conversion to embassy
+/// ticks costs about 2000 cycles a call (measured on CH584 at 62.4 MHz),
+/// which made `delay_us(50)` last 100 us.
 #[cfg(feature = "time-driver-systick")]
 impl Delay {
     /// Busy-wait for `us` microseconds.
     pub fn delay_us(&mut self, us: u32) {
-        let ticks = embassy_time_driver::TICK_HZ as u128 * us as u128 / 1_000_000;
-        self.wait_ticks(ticks as u64);
+        let hz = crate::embassy::time_driver_impl::ticks_per_sec() as u64;
+        self.wait_ticks(hz * us as u64 / 1_000_000);
     }
 
     /// Busy-wait for `ms` milliseconds.
     pub fn delay_ms(&mut self, ms: u32) {
-        let ticks = embassy_time_driver::TICK_HZ as u128 * ms as u128 / 1_000;
-        self.wait_ticks(ticks as u64);
+        let hz = crate::embassy::time_driver_impl::ticks_per_sec() as u64;
+        self.wait_ticks(hz * ms as u64 / 1_000);
     }
 
     fn wait_ticks(&mut self, ticks: u64) {
-        let deadline = embassy_time_driver::now().saturating_add(ticks);
-        while embassy_time_driver::now() < deadline {
+        let deadline = crate::embassy::time_driver_impl::ticks().saturating_add(ticks);
+        while crate::embassy::time_driver_impl::ticks() < deadline {
             core::hint::spin_loop();
         }
     }
