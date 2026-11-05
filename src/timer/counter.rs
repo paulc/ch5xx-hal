@@ -81,4 +81,31 @@ impl<'d, T: Instance> ExternalCounter<'d, T> {
     pub fn stop(&mut self) {
         self.inner.stop();
     }
+    /// Count again from 0, with the wrap event cleared.
+    pub fn restart(&mut self) {
+        let mode = self.inner.mode;
+        let period = self.inner.period;
+        unsafe {
+            self.inner.configure_raw(mode, period);
+        }
+        self.inner.start();
+    }
+    /// Consume the sticky wrap event (the count reaching the end register
+    /// minus two and starting again from 0). Multiple wraps coalesce.
+    pub fn elapsed(&mut self) -> bool {
+        let elapsed = self.inner.events().contains(Events::CYCLE_END);
+        if elapsed {
+            self.inner.acknowledge(Events::CYCLE_END);
+        }
+        elapsed
+    }
+    #[cfg(feature = "embassy")]
+    pub async fn wait(
+        &mut self,
+        irq: impl crate::interrupt::typelevel::Binding<T::Interrupt, super::InterruptHandler<T>>,
+    ) {
+        self.inner.bind_interrupt(irq);
+        self.inner.wait_event(Events::CYCLE_END).await;
+        self.inner.acknowledge(Events::CYCLE_END);
+    }
 }
