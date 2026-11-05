@@ -137,17 +137,54 @@ pub fn init(config: Config) -> Peripherals {
         delay::init();
         // The time driver starts its counter and enables its own interrupt. It
         // reads the frequency from `rcc::clocks()`, so it must run after the
-        // calibration above. It also enables global interrupts: qingke-rt's V3C
-        // startup leaves them clear, so after `init()` interrupts work.
+        // calibration above.
         #[cfg(feature = "embassy")]
         embassy::time_driver_impl::init();
     }
+
+    // With or without a time driver: after `init()` interrupts work.
+    #[cfg(feature = "rt")]
+    unsafe {
+        enable_interrupts()
+    };
 
     critical_section::with(|cs| unsafe {
         gpio::init(cs);
     });
 
     p
+}
+
+/// Enable global interrupts and make them wake the core from `wfi`.
+///
+/// On V3C the authoritative register is `gintenr` (CSR 0x800), which `corecfgr`'s
+/// `IE_REMAP_EN` maps onto `mstatus.MIE`/`MPIE`. qingke-rt's V3C startup leaves
+/// it clear, so an interrupt handler never runs until this is written. WCH's own
+/// `startup_CH585.S` does the equivalent with `mstatus = 0x88`.
+///
+/// `SEVONPEND` (bit 4) matters just as much: QingKe executes `wfi` as `wfe`
+/// whenever `PFIC_SCTLR.WFITOWFE` is set, and `qingke-rt` sets that. A `wfe`
+/// wakes on an *event*, not on a pending interrupt, so an alarm raised while the
+/// executor sleeps inside a critical section (`mstatus.MIE` clear) posts nothing
+/// and the core stays asleep until some unrelated wake-up. Measured cost: 8-25 ms
+/// per alarm, i.e. a 500 ms `Timer` completing in 510-627 ms. With `SEVONPEND`
+/// the same timer is 501.9 ms. An interrupt that becomes pending between the
+/// executor's check and its `wfi` latches the event, so it is not lost.
+///
+/// Done in [`init`] whatever the features: a program with its own interrupt
+/// handlers and no time driver needs both too.
+#[cfg(feature = "rt")]
+unsafe fn enable_interrupts() {
+    // `PFIC.sctlr()` also carries `SETEVENT` (bit 5), which the PAC marks as
+    // write-only. A `modify()` would read that bit back and write it, so the
+    // field is set directly instead: read, OR in just this bit, write.
+    critical_section::with(|_| {
+        let mut sctlr = pac::PFIC.sctlr().read();
+        sctlr.set_sevonpend(true);
+        pac::PFIC.sctlr().write_value(sctlr);
+    });
+
+    unsafe { qingke::register::gintenr::write(0x08) };
 }
 
 #[macro_export]

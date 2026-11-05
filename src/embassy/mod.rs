@@ -31,8 +31,6 @@
 //! not divide the clock evenly loses sub-tick precision but never runs
 //! backwards.
 
-use crate::pac;
-
 #[cfg(any(
     feature = "time-driver-systick",
     feature = "time-driver-tmr0",
@@ -112,31 +110,3 @@ pub mod time_driver_impl;
 /// controls it and `CSR 0xBC1.NEST_LVL` bounds the depth. qingke-rt's V3C
 /// startup sets `NEST_LVL = 1`, i.e. one level.
 pub(crate) const TIME_DRIVER_PRIORITY: qingke::interrupt::Priority = qingke::interrupt::Priority::P8;
-
-/// Enable global interrupts and make them wake the core from `wfi`.
-///
-/// On V3C the authoritative register is `gintenr` (CSR 0x800), which `corecfgr`'s
-/// `IE_REMAP_EN` maps onto `mstatus.MIE`/`MPIE`. qingke-rt's V3C startup leaves
-/// it clear, so an interrupt handler never runs until this is written. WCH's own
-/// `startup_CH585.S` does the equivalent with `mstatus = 0x88`.
-///
-/// `SEVONPEND` (bit 4) matters just as much: QingKe executes `wfi` as `wfe`
-/// whenever `PFIC_SCTLR.WFITOWFE` is set, and `qingke-rt` sets that. A `wfe`
-/// wakes on an *event*, not on a pending interrupt, so an alarm raised while the
-/// executor sleeps inside a critical section (`mstatus.MIE` clear) posts nothing
-/// and the core stays asleep until some unrelated wake-up. Measured cost: 8–25 ms
-/// per alarm, i.e. a 500 ms `Timer` completing in 510–627 ms. With `SEVONPEND`
-/// the same timer is 501.9 ms.
-///
-/// Shared by both drivers; called from their `init`.
-pub(crate) fn enable_interrupts() {
-    // `PFIC.sctlr()` also carries `SETEVENT` (bit 5), which the PAC marks as
-    // write-only. A `modify()` would read that bit back and write it, so the
-    // field is set directly instead: read, OR in just this bit, write.
-    let sctlr = pac::PFIC.sctlr().read();
-    let mut new = sctlr;
-    new.set_sevonpend(true);
-    pac::PFIC.sctlr().write_value(new);
-
-    unsafe { qingke::register::gintenr::write(0x08) };
-}

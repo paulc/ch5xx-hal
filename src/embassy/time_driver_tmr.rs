@@ -207,6 +207,4 @@ pub unsafe fn init() {
     // typelevel API like any other HAL driver would.
     IRQ.set_priority(super::TIME_DRIVER_PRIORITY);
     unsafe { IRQ.enable() };
-
-    super::enable_interrupts();
 }

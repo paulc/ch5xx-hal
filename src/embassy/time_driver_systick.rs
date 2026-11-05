@@ -151,6 +151,4 @@ pub unsafe fn init() {
         qingke::pfic::set_priority(irq, super::TIME_DRIVER_PRIORITY as u8);
         qingke::pfic::enable_interrupt(irq);
     }
-
-    super::enable_interrupts();
 }

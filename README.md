@@ -77,7 +77,7 @@ multiple selections produce a compile error. The HAL has no default time driver,
 while the example crate defaults to SysTick. A selected TMR is removed from
 `Peripherals`, preventing a second owner.
 
-`init()` starts the selected driver and enables interrupts, so an Embassy
+`init()` starts the selected driver, and enables interrupts (with `rt`), so an Embassy
 executor can be started directly from `main`.
 
 ## Target and atomics
