@@ -24,8 +24,10 @@ use embassy_time::Timer;
 use hal::interrupt::typelevel::Interrupt;
 use hwtest::check;
 
-/// TMR0 periods (sysclk cycles at 62.4 MHz): 10 us, 100 us, 1 ms.
-const PERIODS: [u32; 3] = [624, 6_240, 62_400];
+/// TMR0 periods (sysclk cycles at 62.4 MHz): 1 ms, 100 us, 10 us, slowest
+/// first, so a rate the core cannot keep up with shows as the phase it stops
+/// in.
+const PERIODS: [u32; 3] = [62_400, 6_240, 624];
 const SECS: u32 = 10;
 
 struct Slot(UnsafeCell<Option<Waker>>);
@@ -120,6 +122,12 @@ async fn main(spawner: Spawner) -> ! {
 
     let t = hal::pac::TMR0;
     for (phase, &period) in PERIODS.iter().enumerate() {
+        hwtest::println!(
+            "phase {}: {} us interrupt",
+            phase,
+            period as u64 * 1_000_000 / hal::rcc::clocks().sysclk.0 as u64
+        );
+        Timer::after_millis(10).await;
         t.ctrl_mod().write(|w| w.set_all_clear(true));
         t.ctrl_mod().write(|w| w.0 = 0);
         t.cnt_end().write(|w| w.set_cnt_end(period));
