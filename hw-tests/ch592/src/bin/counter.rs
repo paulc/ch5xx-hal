@@ -84,8 +84,10 @@ async fn main(_spawner: Spawner) -> ! {
     Timer::after_micros(500).await;
     check!(!cnt.elapsed(), "counter: no period event after 0.5 ms");
     Timer::after_micros(1000).await;
-    check!(cnt.elapsed(), "counter: period event after 1.5 ms");
-    check!(!cnt.elapsed(), "counter: elapsed consumes the event");
+    // Both reads before printing: a printed line takes longer than a period.
+    let (first, second) = (cnt.elapsed(), cnt.elapsed());
+    check!(first, "counter: period event after 1.5 ms");
+    check!(!second, "counter: elapsed consumes the event");
     cnt.restart(period);
     let c = cnt.count();
     check!(c < 60_000 / 10, "counter: restart starts from 0 (count {})", c);
@@ -99,7 +101,9 @@ async fn main(_spawner: Spawner) -> ! {
     check!((9_000..=10_500).contains(&us), "counter: 10 x wait took {} us", us);
 
     // wait with the counter stopped must not return.
+    // The event is sticky: drop one left from before the stop.
     cnt.stop();
+    let _ = cnt.elapsed();
     let r = select(cnt.wait(Irqs), Timer::after_millis(5)).await;
     check!(matches!(r, Either::Second(())), "counter: wait waits while stopped");
 
