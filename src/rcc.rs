@@ -33,6 +33,12 @@
 //! 32 kHz mode is deliberately not offered: it requires the whole program in
 //! RAM.
 //!
+//! On CH585/CH584 the FlashROM timing (`FLASH_SCK` bit 4, `FLASH_CFG`) is part
+//! of every switch, as in WCH's `SetSysClock` (`CH58x_sys.c`). Left at its
+//! reset value (0x07), code runs from flash at about half speed above 26 MHz.
+//! The switch runs from RAM, so nothing is fetched from flash while its clock
+//! and timing change.
+//!
 //! # CH592
 //!
 //! CH592 has no internal high-speed oscillator. Its tree starts at the 32 MHz
@@ -617,16 +623,22 @@ pub unsafe fn set_config(config: Config) -> Clocks {
         });
     }
 
-    with_safe_access(|| {
-        pac::SYS.clk_cfg().write(|w| {
-            w.set_clk_pll_div(div);
-            w.set_clk_sys_mod(sys_mod);
-            w.set_xrom_sclk_sel(xrom_sclk);
-            w.set_osc32m_sel(osc32m_sel);
-            w.set_pll_gate_diss(pll_gate_diss);
-            w.set_pll_gate_time(false);
-        });
-    });
+    let mut cfg = pac::sys::regs::ClkCfg(0);
+    cfg.set_clk_pll_div(div);
+    cfg.set_clk_sys_mod(sys_mod);
+    cfg.set_xrom_sclk_sel(xrom_sclk);
+    cfg.set_osc32m_sel(osc32m_sel);
+    cfg.set_pll_gate_diss(pll_gate_diss);
+    cfg.set_pll_gate_time(false);
+    #[cfg(any(ch584, ch585))]
+    {
+        let (sck4, flash_cfg) = ch585_raw::flash_timing(cfg);
+        let sck = core::ptr::read_volatile(ch585_raw::FLASH_SCK);
+        let sck = if sck4 { sck | 1 << 4 } else { sck & !(1 << 4) };
+        critical_section::with(|_| ch585_raw::switch(cfg.0, sck, flash_cfg));
+    }
+    #[cfg(not(any(ch584, ch585)))]
+    with_safe_access(|| pac::SYS.clk_cfg().write_value(cfg));
 
     // The oscillator multiplexer needs 1 us to settle after OSC32M_SEL changes
     // (datasheet 6.3). No timer is available at this point, so spin a fixed
@@ -644,6 +656,85 @@ pub unsafe fn set_config(config: Config) -> Clocks {
 
     SYSCLK_HZ.store(sysclk.0, Ordering::Relaxed);
     Clocks { sysclk }
+}
+
+/// The CH585/CH584 clock switch, after WCH's `SetSysClock` (`CH58x_sys.c`).
+#[cfg(any(ch584, ch585))]
+mod ch585_raw {
+    /// `R16_CLK_SYS_CFG`.
+    const CLK_CFG: usize = 0x4000_1008;
+    /// `R8_SAFE_MODE_CTRL`: `RB_SAFE_AUTO_EN` is bit 0, `RB_XROM_312M_SEL`
+    /// bit 4.
+    const SAFE_MODE_CTRL: usize = 0x4000_1010;
+    /// `R8_SAFE_ACCESS_SIG`.
+    const SAFE_ACCESS_SIG: usize = 0x4000_1040;
+    /// `R8_FLASH_SCK`. The FlashROM controller is not in the PAC.
+    pub const FLASH_SCK: *mut u8 = 0x4000_1805 as *mut u8;
+    /// `R8_FLASH_CFG`, reset value 0x07 (datasheet table 4-1).
+    const FLASH_CFG: usize = 0x4000_1807;
+
+    /// `FLASH_SCK` bit 4 and `FLASH_CFG` for `cfg`, from `SetSysClock`.
+    pub fn flash_timing(cfg: crate::pac::sys::regs::ClkCfg) -> (bool, u8) {
+        // A divider of 32 is encoded as 0.
+        let div = cfg.clk_pll_div();
+        if cfg.xrom_sclk_sel() {
+            match div {
+                0 => (true, 0x07),
+                1..=9 => (false, 0x01),
+                10..=15 => (false, 0x02),
+                _ => (false, 0x07),
+            }
+        } else if div < 8 {
+            (false, 0x51)
+        } else {
+            (false, 0x57)
+        }
+    }
+
+    /// Write `FLASH_SCK`, `FLASH_CFG` and then `CLK_CFG` (through the 32 kHz
+    /// mode) in one safe-access window, held open by clearing
+    /// `SAFE_AUTO_EN`, with the FlashROM clocked at 312 MHz.
+    ///
+    /// It runs from RAM (`.data` is copied there at startup, like WCH's
+    /// `__HIGH_CODE`), so no instruction is fetched from FlashROM while its
+    /// clock and timing change: plain stores only, which also holds without
+    /// optimisation. Interrupts must be masked.
+    #[inline(never)]
+    #[link_section = ".data.ch5xx_hal.rcc.switch"]
+    pub unsafe fn switch(cfg: u16, sck: u8, flash_cfg: u8) {
+        core::arch::asm!(
+            "lbu {t}, 0({mode})",
+            "ori {t}, {t}, 0x10",
+            "andi {t}, {t}, -2",
+            "sb {t}, 0({mode})",
+            "fence.i",
+            "li {t}, 0x57",
+            "sb {t}, 0({sig})",
+            "li {t}, 0xa8",
+            "sb {t}, 0({sig})",
+            "fence.i",
+            "sb {sck}, 0({flash_sck})",
+            "sb {flash_cfg}, 0({flash_cfg_reg})",
+            "ori {t}, {cfg}, 0xc0",
+            "sh {t}, 0({clk})",
+            "sh {cfg}, 0({clk})",
+            "lbu {t}, 0({mode})",
+            "ori {t}, {t}, 1",
+            "sb {t}, 0({mode})",
+            "sb zero, 0({sig})",
+            "fence.i",
+            t = out(reg) _,
+            mode = in(reg) SAFE_MODE_CTRL,
+            sig = in(reg) SAFE_ACCESS_SIG,
+            flash_sck = in(reg) FLASH_SCK,
+            flash_cfg_reg = in(reg) FLASH_CFG,
+            clk = in(reg) CLK_CFG,
+            cfg = in(reg) cfg,
+            sck = in(reg) sck,
+            flash_cfg = in(reg) flash_cfg,
+            options(nostack),
+        );
+    }
 }
 
 /// Register addresses WCH's `CH59x_sys.c` writes but the PAC does not model.
