@@ -10,7 +10,6 @@
 use ch5xx_hal as hal;
 use hal::uart::{self, Uart};
 use hwtest::check;
-use panic_halt as _;
 use qingke_rt::entry;
 
 #[entry]

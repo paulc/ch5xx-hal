@@ -20,7 +20,6 @@ use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
 use embassy_usb::driver::EndpointError;
 use embassy_usb::{Builder, Handler};
 use hal::{bind_interrupts, peripherals, usb};
-use panic_halt as _;
 
 bind_interrupts!(struct Irqs {
     USB => usb::InterruptHandler<peripherals::USBFS>;

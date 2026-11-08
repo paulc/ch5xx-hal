@@ -23,7 +23,6 @@ use embassy_executor::Spawner;
 use embassy_time::Timer;
 use hal::interrupt::typelevel::Interrupt;
 use hwtest::check;
-use panic_halt as _;
 
 /// TMR0 periods (sysclk cycles at 60 MHz): 10 us, 100 us, 1 ms.
 const PERIODS: [u32; 3] = [600, 6_000, 60_000];

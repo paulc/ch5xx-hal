@@ -22,6 +22,9 @@
 #   OUT         directory for the logs (default target/hw-test).
 #   TRIES       attempts per test when nothing is captured (default 3); the
 #               SDI console sometimes fails to start.
+#   BEFORE      shell command run before each attempt, e.g. one that
+#               power-cycles the board: a test that hangs the chip can leave
+#               the probe unable to attach until then.
 #
 # The exit status is the number of tests that failed or reported nothing.
 
@@ -39,6 +42,7 @@ fi
 CARGO_ARGS=${CARGO_ARGS:-}
 SECS=${SECS:-40}
 TRIES=${TRIES:-3}
+BEFORE=${BEFORE:-}
 OUT=${OUT:-target/hw-test}
 mkdir -p "$OUT"
 
@@ -70,6 +74,7 @@ finished() {
 
 # Run one attempt, stopping once the result is in.
 run_once() {
+    [ -n "$BEFORE" ] && sh -c "$BEFORE" >/dev/null 2>&1
     env "$runner_var=$RUNNER" timeout "$SECS" cargo run -q --release $CARGO_ARGS --bin "$t" >"$log" 2>&1 &
     pid=$!
     while kill -0 $pid 2>/dev/null; do

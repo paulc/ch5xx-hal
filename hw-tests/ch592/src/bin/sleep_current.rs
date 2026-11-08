@@ -28,7 +28,6 @@ use hal::gpio::{Input, Pull};
 use hal::power::{self, Retention, WakeDelay, WakeSources};
 use hal::rtc::Rtc;
 use hal::uart::{self, UartTx};
-use panic_halt as _;
 
 /// `R16_PIN_ALTERNATE`; bit 13 set turns the debug interface off. Upstream's
 /// `ch5xx-data` does not have the field, so it is written by address.

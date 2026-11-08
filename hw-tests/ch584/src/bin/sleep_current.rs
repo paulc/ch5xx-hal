@@ -29,7 +29,6 @@ use hal::gpio::{Input, Pull};
 use hal::power::{self, Retention, WakeDelay, WakeSources};
 use hal::rtc::Rtc;
 use hal::uart::{self, UartTx};
-use panic_halt as _;
 
 fn set_debug_interface_enabled(enabled: bool) {
     hwtest::safe_access(|| hal::pac::SYS.safe_debug_ctrl().write(|w| w.set_debug_dis(!enabled)));

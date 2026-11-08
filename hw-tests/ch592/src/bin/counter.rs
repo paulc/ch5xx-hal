@@ -23,7 +23,6 @@ use hal::timer::{CaptureEdge, PeriodTicks};
 use hal::uart::{self, UartTx};
 use hal::{bind_interrupts, peripherals};
 use hwtest::check;
-use panic_halt as _;
 
 bind_interrupts!(struct Irqs {
     TMR1 => hal::timer::InterruptHandler<peripherals::TMR1>;

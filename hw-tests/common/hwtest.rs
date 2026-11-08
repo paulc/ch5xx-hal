@@ -138,3 +138,45 @@ pub fn select_lsi() {
     qingke::riscv::asm::delay(10_000);
     crate::safe_access(|| sys.ck32k_config().modify(|w| w.set_clk_xt32k_pon(false)));
 }
+
+/// Report a panic as a failed check and keep printing a summary, so a panic
+/// shows up in `hw-test.sh`'s table instead of as a test that never finished.
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    FAIL.fetch_add(1, Ordering::Relaxed);
+    let (pass, fail) = counts();
+    loop {
+        write_line(format_args!("panic: {}: FAIL", info));
+        write_line(format_args!("panic done: {} pass, {} fail", pass, fail));
+        qingke::riscv::asm::delay(20_000_000);
+    }
+}
+
+/// The low word of the core's cycle counter (`cycle`, CSR 0xC00). It does not
+/// count on CH584/CH585 (`clocks` checks it), so the delays below do not use it.
+pub fn cycles() -> u32 {
+    let c: u32;
+    unsafe { core::arch::asm!("csrr {0}, 0xC00", out(reg) c) };
+    c
+}
+
+/// `qingke::riscv::asm::delay` loops per millisecond, measured on first use.
+static LOOPS_PER_MS: AtomicU32 = AtomicU32::new(0);
+
+/// Busy-wait `us` microseconds on a loop calibrated once against embassy time
+/// over 10 ms, so a short wait costs no timebase reads (`Delay` and `Instant`
+/// add tens of microseconds each).
+pub fn delay_us(us: u32) {
+    let mut per_ms = LOOPS_PER_MS.load(Ordering::Relaxed);
+    if per_ms == 0 {
+        let t0 = embassy_time::Instant::now();
+        let mut chunks = 0u32;
+        while t0.elapsed().as_micros() < 10_000 {
+            qingke::riscv::asm::delay(1000);
+            chunks += 1;
+        }
+        per_ms = (chunks * 1000 / 10).max(1);
+        LOOPS_PER_MS.store(per_ms, Ordering::Relaxed);
+    }
+    qingke::riscv::asm::delay((us as u64 * per_ms as u64 / 1000) as u32);
+}

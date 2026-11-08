@@ -27,7 +27,6 @@ use hal::power::{self, Retention, WakeDelay, WakeSources};
 use hal::rtc::Rtc;
 use hal::uart::{self, UartTx};
 use hal::watchdog::{Battery, Level};
-use panic_halt as _;
 
 /// The output.
 static mut TX: Option<UartTx<'static, UART0, Blocking>> = None;

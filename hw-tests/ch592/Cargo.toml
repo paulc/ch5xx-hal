@@ -12,7 +12,6 @@ bench = false
 [dependencies]
 ch5xx-hal = { path = "../../", features = ["ch592", "rt", "memory-x"] }
 
-panic-halt = "1.0"
 critical-section = "1.2.0"
 embedded-hal = "1.0.0"
 embedded-hal-async = "1.0.0"

@@ -14,7 +14,6 @@ use embassy_time::{Duration, Instant};
 use hal::peripherals::RTC;
 use hal::rtc::{DateTime, Error, Period, Rtc};
 use hwtest::check;
-use panic_halt as _;
 use qingke_rt::entry;
 
 /// 32 kHz cycles per second, measured over `ms` of SysTick time.

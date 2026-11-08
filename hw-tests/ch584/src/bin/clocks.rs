@@ -25,7 +25,6 @@ use hal::timer::counter::Counter;
 use hal::timer::PeriodTicks;
 use hal::{pac, peripherals, rcc};
 use hwtest::check;
-use panic_halt as _;
 use qingke_rt::entry;
 
 /// The longest TMR period: 0.86 s at 78 MHz.

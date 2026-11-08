@@ -16,7 +16,6 @@ use embassy_executor::Spawner;
 use embassy_time::{with_timeout, Duration, Instant, Timer};
 use hal::gpio::{Level, Output, Speed};
 use hwtest::check;
-use panic_halt as _;
 
 /// Clock to test at.
 const CLOCK: hal::rcc::Config = hal::rcc::Config::HSI_5_33MHZ;

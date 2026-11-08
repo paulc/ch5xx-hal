@@ -21,7 +21,6 @@ use hal::mode::Async;
 use hal::uart::{self, Uart, UartRx};
 use hal::{bind_interrupts, peripherals};
 use hwtest::check;
-use panic_halt as _;
 
 bind_interrupts!(struct Irqs {
     UART0 => uart::InterruptHandler<peripherals::UART0>;

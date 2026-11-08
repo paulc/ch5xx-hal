@@ -23,7 +23,6 @@ use hal::spi::{self, Spi};
 use hal::time::Hertz;
 use hal::{bind_interrupts, pac, peripherals};
 use hwtest::check;
-use panic_halt as _;
 
 bind_interrupts!(struct Irqs {
     SPI0 => spi::InterruptHandler<peripherals::SPI0>;

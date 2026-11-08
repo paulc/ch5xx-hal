@@ -6,7 +6,8 @@
 use ch5xx_hal as hal;
 use hal::delay::Delay;
 use hal::gpio::{Level, Output, Speed};
-use panic_halt as _;
+// The panic handler.
+use hwtest as _;
 use qingke_rt::entry;
 
 #[entry]

@@ -25,7 +25,6 @@ use hal::i2c::{self, Error, I2c};
 use hal::time::Hertz;
 use hal::{bind_interrupts, pac, peripherals};
 use hwtest::check;
-use panic_halt as _;
 
 bind_interrupts!(struct Irqs {
     I2C0 => i2c::InterruptHandler<peripherals::I2C0>;

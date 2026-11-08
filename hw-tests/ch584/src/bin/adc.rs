@@ -23,7 +23,6 @@ use hal::dma::StaticSampleBuffer;
 use hal::gpio::{Input, Pull};
 use hal::pac;
 use hwtest::check;
-use panic_halt as _;
 use qingke_rt::entry;
 
 static ONE_PASS: StaticSampleBuffer<3> = StaticSampleBuffer::new([0; 3]);

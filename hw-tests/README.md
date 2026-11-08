@@ -18,12 +18,16 @@ uart_loopback done: 5 pass, 0 fail
 ```
 
 and they are printed over the debug link ("SDI print"), so a WCH-LinkE is all
-the setup a test needs. The last line repeats once a second. `SKIP` marks a
-check that the HAL cannot run yet, with the reason.
+the setup a test needs. The last line repeats every few seconds. `SKIP` marks
+a check that the HAL cannot run yet, with the reason. A panic is reported as a
+failed check (`panic: <message>: FAIL`) followed by a `panic done` summary, so
+it shows in the results instead of as a test that never finished.
 
 `common/hwtest.rs` holds what the crates share: the SDI console, the PASS/FAIL
-counts and the summary line. Each crate's `lib.rs` includes it and adds the
-chip's debug-module address and its safe-access sequence.
+counts, the summary line, the panic handler and a short busy-wait
+(`delay_us`) calibrated against embassy time, for timing a signal without the
+cost of a timebase read. Each crate's `lib.rs` includes it and adds the chip's
+debug-module address and its safe-access sequence.
 
 ## Running
 
@@ -70,6 +74,15 @@ CH592), and the CH592 also needs `--speed low`; the crates' runners have both.
 The 0.1.x releases of wlink refuse to arm SDI print for these chips: add them
 to the chips `--enable-sdi-print` accepts. The console sometimes fails to
 start, so `hw-test.sh` retries a test that printed nothing (`TRIES`).
+
+A test that hangs the chip can leave the probe unable to attach for the next
+one until the board is power-cycled. `BEFORE` is a command run before each
+attempt; with the board powered from the WCH-LinkE:
+
+```console
+BEFORE="wlink set-power disable5v; sleep 1; wlink set-power enable5v" \
+    hw-tests/hw-test.sh hw-tests/ch584
+```
 
 ## Tests
 

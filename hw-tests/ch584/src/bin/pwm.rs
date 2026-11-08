@@ -22,7 +22,6 @@ use hal::pwm::{self, Cycle, Polarity, Pwm};
 use hal::timer::simple_pwm::SimplePwm;
 use hal::timer::{OutputPolarity, PeriodTicks, Repeat};
 use hwtest::check;
-use panic_halt as _;
 
 #[derive(Clone, Copy)]
 enum P {

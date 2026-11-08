@@ -20,7 +20,6 @@ use embassy_time::{Duration, Instant};
 use hal::pac;
 use hal::watchdog::{self, ResetCause, Watchdog};
 use hwtest::check;
-use panic_halt as _;
 use qingke_rt::entry;
 
 /// Second boot: the high nibble marks the stage, the low nibble carries the

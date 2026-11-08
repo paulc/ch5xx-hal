@@ -23,7 +23,6 @@ use embassy_time::Timer;
 use hal::gpio::{AnyPin, Input, Pull};
 use hal::{pac, Peri};
 use hwtest::check;
-use panic_halt as _;
 
 /// Flip a pin between pull-up (`high`) and pull-down.
 fn set_pull(port_b: bool, n: usize, high: bool) {
