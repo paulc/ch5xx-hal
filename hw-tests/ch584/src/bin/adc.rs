@@ -23,7 +23,8 @@ use hal::dma::StaticSampleBuffer;
 use hal::gpio::{Input, Pull};
 use hal::pac;
 use hwtest::check;
-use {panic_halt as _, qingke_rt::entry};
+use panic_halt as _;
+use qingke_rt::entry;
 
 static ONE_PASS: StaticSampleBuffer<3> = StaticSampleBuffer::new([0; 3]);
 static PASSES: StaticSampleBuffer<48> = StaticSampleBuffer::new([0; 48]);
@@ -181,14 +182,14 @@ fn main() -> ! {
         pull(5, Pull::Down);
         pull(12, Pull::Up);
         delay_us(1000);
-        let pattern = |buf: &[u16]| {
-            buf.chunks(3)
-                .all(|s| s[0] >= 4090 && s[1] < 40 && s[2] >= 4090)
-        };
+        let pattern = |buf: &[u16]| buf.chunks(3).all(|s| s[0] >= 4090 && s[1] < 40 && s[2] >= 4090);
 
         let buf = ONE_PASS.take().unwrap();
         buf.fill(0xffff);
-        let r = scan.read(buf).map_err(|(e, _)| e).and_then(|t| t.blocking_wait().map_err(|(e, _)| e));
+        let r = scan
+            .read(buf)
+            .map_err(|(e, _)| e)
+            .and_then(|t| t.blocking_wait().map_err(|(e, _)| e));
         match r {
             Ok(buf) => check!(pattern(buf), "scan one pass: up, down, up ({:?})", buf),
             Err(e) => check!(false, "scan one pass ({:?})", e),
@@ -197,7 +198,10 @@ fn main() -> ! {
         let buf = PASSES.take().unwrap();
         buf.fill(0xffff);
         let t0 = Instant::now();
-        let r = scan.read(buf).map_err(|(e, _)| e).and_then(|t| t.blocking_wait().map_err(|(e, _)| e));
+        let r = scan
+            .read(buf)
+            .map_err(|(e, _)| e)
+            .and_then(|t| t.blocking_wait().map_err(|(e, _)| e));
         let us = t0.elapsed().as_micros() as i32;
         match r {
             Ok(buf) => {

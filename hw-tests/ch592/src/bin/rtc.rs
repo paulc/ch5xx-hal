@@ -11,10 +11,11 @@
 
 use ch5xx_hal as hal;
 use embassy_time::{Duration, Instant};
-use hal::rtc::{DateTime, Error, Period, Rtc};
 use hal::peripherals::RTC;
+use hal::rtc::{DateTime, Error, Period, Rtc};
 use hwtest::check;
-use {panic_halt as _, qingke_rt::entry};
+use panic_halt as _;
+use qingke_rt::entry;
 
 /// 32 kHz cycles per second, measured over `ms` of SysTick time.
 fn rate(rtc: &Rtc<'_, RTC>, ms: u64) -> u64 {
@@ -67,11 +68,36 @@ fn main() -> ! {
     let back = rtc.datetime();
     check!(r.is_ok() && back == set, "set_datetime reads back ({:?})", back);
 
-    rollover(&mut rtc, "day rollover", dt(2026, 11, 8, 23, 59, 59), dt(2026, 11, 9, 0, 0, 0));
-    rollover(&mut rtc, "month rollover", dt(2026, 4, 30, 23, 59, 59), dt(2026, 5, 1, 0, 0, 0));
-    rollover(&mut rtc, "year rollover", dt(2026, 12, 31, 23, 59, 59), dt(2027, 1, 1, 0, 0, 0));
-    rollover(&mut rtc, "leap day", dt(2028, 2, 28, 23, 59, 59), dt(2028, 2, 29, 0, 0, 0));
-    rollover(&mut rtc, "no leap day", dt(2027, 2, 28, 23, 59, 59), dt(2027, 3, 1, 0, 0, 0));
+    rollover(
+        &mut rtc,
+        "day rollover",
+        dt(2026, 11, 8, 23, 59, 59),
+        dt(2026, 11, 9, 0, 0, 0),
+    );
+    rollover(
+        &mut rtc,
+        "month rollover",
+        dt(2026, 4, 30, 23, 59, 59),
+        dt(2026, 5, 1, 0, 0, 0),
+    );
+    rollover(
+        &mut rtc,
+        "year rollover",
+        dt(2026, 12, 31, 23, 59, 59),
+        dt(2027, 1, 1, 0, 0, 0),
+    );
+    rollover(
+        &mut rtc,
+        "leap day",
+        dt(2028, 2, 28, 23, 59, 59),
+        dt(2028, 2, 29, 0, 0, 0),
+    );
+    rollover(
+        &mut rtc,
+        "no leap day",
+        dt(2027, 2, 28, 23, 59, 59),
+        dt(2027, 3, 1, 0, 0, 0),
+    );
 
     // The calendar must keep counting: odd seconds are in the 32 kHz half.
     let a = rtc.datetime();
@@ -121,7 +147,11 @@ fn main() -> ! {
         }
     }
     rtc.stop_timer();
-    check!((7..=9).contains(&n), "interval 125 ms fires 7..=9 times a second ({})", n);
+    check!(
+        (7..=9).contains(&n),
+        "interval 125 ms fires 7..=9 times a second ({})",
+        n
+    );
 
     hwtest::skip("LSE on PA10/PA11", "no clock-source API");
 

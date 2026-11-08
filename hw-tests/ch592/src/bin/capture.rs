@@ -137,7 +137,8 @@ fn cycles(t0: u32, t1: u32) -> u32 {
     if t1 >= t0 {
         t1 - t0
     } else {
-        t1.wrapping_sub(t0).wrapping_add(pac::SYSTICK.stk_cmplr().read().cmpl().wrapping_add(1))
+        t1.wrapping_sub(t0)
+            .wrapping_add(pac::SYSTICK.stk_cmplr().read().cmpl().wrapping_add(1))
     }
 }
 
@@ -277,7 +278,12 @@ async fn main(_spawner: Spawner) -> ! {
         let want = want_bits * bit_ticks(2400);
         let (ok, worst) = all_near(&got[..n], edge == CaptureEdge::Both, want);
         let timeouts = got[..n].iter().filter(|r| **r == Ok(Capture::Timeout)).count();
-        hwtest::println!("{:?} at 2400 baud, timeout 4800, want {} ticks, {} results", edge, want, n);
+        hwtest::println!(
+            "{:?} at 2400 baud, timeout 4800, want {} ticks, {} results",
+            edge,
+            want,
+            n
+        );
         c_check("  timeouts merged into each measurement (worst deviation)", ok, worst);
         c_check("  timeouts reported", timeouts >= 5 * 3, timeouts as i64);
         if !ok {

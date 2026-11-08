@@ -138,7 +138,10 @@ async fn main(_spawner: Spawner) -> ! {
     let pending = rtc.trigger_pending();
     rtc.clear_trigger();
     log!("halt: RTC {} ms, SysTick {} ms, alarm {}", r, e, pending);
-    c.check("halt ends on the RTC alarm after ~200 ms", pending && (190..260).contains(&r));
+    c.check(
+        "halt ends on the RTC alarm after ~200 ms",
+        pending && (190..260).contains(&r),
+    );
     c.check("SysTick stopped in halt", e < 50);
     c.check("HCLK restored after halt", hal::pac::SYS.clk_cfg().read().0 == clk_cfg);
 
@@ -161,7 +164,10 @@ async fn main(_spawner: Spawner) -> ! {
     let pending = rtc.trigger_pending();
     rtc.clear_trigger();
     log!("sleep: RTC {} ms, SysTick {} ms, alarm {}", r, e, pending);
-    c.check("sleep ends on the RTC alarm after ~200 ms", pending && (190..260).contains(&r));
+    c.check(
+        "sleep ends on the RTC alarm after ~200 ms",
+        pending && (190..260).contains(&r),
+    );
     c.check("SysTick stopped in sleep", e < 50);
     let t1 = Instant::now();
     Timer::after_millis(10).await;
@@ -192,9 +198,15 @@ async fn main(_spawner: Spawner) -> ! {
         slept,
         if by_rtc { "RTC (no key press)" } else { "KEY" }
     );
-    c.check("key sleep finishes before the edge wait", matches!(r, Either::Second(())));
+    c.check(
+        "key sleep finishes before the edge wait",
+        matches!(r, Either::Second(())),
+    );
     if by_rtc {
-        c.check("RTC timeout ends the key sleep after ~10 s", (9_900..10_500).contains(&slept));
+        c.check(
+            "RTC timeout ends the key sleep after ~10 s",
+            (9_900..10_500).contains(&slept),
+        );
     } else {
         c.check("KEY wakes the sleep before the timeout", slept < 9_900);
     }

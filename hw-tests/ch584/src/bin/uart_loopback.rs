@@ -10,7 +10,8 @@
 use ch5xx_hal as hal;
 use hal::uart::{self, Uart};
 use hwtest::check;
-use {panic_halt as _, qingke_rt::entry};
+use panic_halt as _;
+use qingke_rt::entry;
 
 #[entry]
 fn main() -> ! {
@@ -18,9 +19,13 @@ fn main() -> ! {
     hwtest::sdi_enable();
 
     for &baud in &[9600u32, 115_200, 1_000_000] {
-        let mut uart =
-            Uart::new_blocking::<0>(p.UART0.reborrow(), p.PB4.reborrow(), p.PB7.reborrow(), uart::Config::new(baud))
-                .unwrap();
+        let mut uart = Uart::new_blocking::<0>(
+            p.UART0.reborrow(),
+            p.PB4.reborrow(),
+            p.PB7.reborrow(),
+            uart::Config::new(baud),
+        )
+        .unwrap();
         uart.set_internal_loopback(true);
 
         // Up to a FIFO's worth at a time: nothing drains RX while we write.
@@ -56,7 +61,12 @@ fn main() -> ! {
     // clock would be 111.1 kbaud. At 62.4 MHz, 3 Mbaud is 2.6 Mbaud.
     check!(
         matches!(
-            Uart::new_blocking::<0>(unsafe { hal::peripherals::UART1::steal() }, unsafe { hal::peripherals::PA8::steal() }, unsafe { hal::peripherals::PA9::steal() }, uart::Config::new(3_000_000)),
+            Uart::new_blocking::<0>(
+                unsafe { hal::peripherals::UART1::steal() },
+                unsafe { hal::peripherals::PA8::steal() },
+                unsafe { hal::peripherals::PA9::steal() },
+                uart::Config::new(3_000_000)
+            ),
             Err(uart::ConfigError::Baudrate)
         ),
         "3 Mbaud refused (ConfigError::Baudrate)"

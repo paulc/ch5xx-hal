@@ -17,8 +17,9 @@ use embassy_futures::join::join;
 use embassy_time::{with_timeout, Duration, Timer};
 use hal::delay::Delay;
 use hal::gpio::{Input, Level, Output, Pull, Speed};
+use hal::mode::Async;
 use hal::uart::{self, Uart, UartRx};
-use hal::{bind_interrupts, mode::Async, peripherals};
+use hal::{bind_interrupts, peripherals};
 use hwtest::check;
 use panic_halt as _;
 
@@ -54,7 +55,10 @@ async fn main(_spawner: Spawner) -> ! {
         delay.delay_us(10);
         low && inp.is_high()
     };
-    hwtest::println!("PA14-PA15 jumper: {}", if jumper { "yes" } else { "no (TX-only tests)" });
+    hwtest::println!(
+        "PA14-PA15 jumper: {}",
+        if jumper { "yes" } else { "no (TX-only tests)" }
+    );
 
     let uart = Uart::new::<1>(p.UART0, p.PA15, p.PA14, Irqs, uart::Config::new(1_000_000)).unwrap();
     let (mut tx, mut rx) = uart.split();
@@ -81,7 +85,11 @@ async fn main(_spawner: Spawner) -> ! {
         mcr.modify(|w| w.set_mcr_loop(false));
         let mut buf = [0u8; 32];
         let n = read_some_n(&mut rx, &mut buf, 6).await;
-        check!(n == 6 && &buf[..6] == b"loop!\n", "async read_some (FIFO preload): {} bytes", n);
+        check!(
+            n == 6 && &buf[..6] == b"loop!\n",
+            "async read_some (FIFO preload): {} bytes",
+            n
+        );
         // Nothing more: read_some must keep waiting.
         let r = with_timeout(Duration::from_millis(20), rx.read_some(&mut buf)).await;
         check!(r.is_err(), "read_some waits with nothing to read");
@@ -109,7 +117,10 @@ async fn main(_spawner: Spawner) -> ! {
             read_some_n(&mut rx, &mut buf, 3),
         )
         .await;
-        check!(r.is_err() && n == 3 && &buf[..3] == b"abc", "read_some after a cancelled read_some");
+        check!(
+            r.is_err() && n == 3 && &buf[..3] == b"abc",
+            "read_some after a cancelled read_some"
+        );
         check!(tx.flush().await.is_ok(), "flush");
     }
 

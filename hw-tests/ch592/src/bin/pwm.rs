@@ -17,7 +17,7 @@ use embassy_executor::Spawner;
 use embedded_hal::pwm::SetDutyCycle;
 use hal::delay::Delay;
 use hal::pac;
-use hal::pwm::{self, Cycle, Pwm, Polarity};
+use hal::pwm::{self, Cycle, Polarity, Pwm};
 use hal::timer::simple_pwm::SimplePwm;
 use hal::timer::{OutputPolarity, PeriodTicks, Repeat};
 use hwtest::check;
@@ -48,7 +48,8 @@ fn cycles(t0: u32, t1: u32) -> u32 {
     if t1 >= t0 {
         t1 - t0
     } else {
-        t1.wrapping_sub(t0).wrapping_add(pac::SYSTICK.stk_cmplr().read().cmpl().wrapping_add(1))
+        t1.wrapping_sub(t0)
+            .wrapping_add(pac::SYSTICK.stk_cmplr().read().cmpl().wrapping_add(1))
     }
 }
 
@@ -244,10 +245,16 @@ async fn main(_spawner: Spawner) -> ! {
     }
     hwtest::check(
         "PWMX divisor 0 refused",
-        matches!(Pwm::new(p.PWMX.reborrow(), pwm::Config::new(0, Cycle::Clocks256)), Err(pwm::ConfigError::Divisor)),
+        matches!(
+            Pwm::new(p.PWMX.reborrow(), pwm::Config::new(0, Cycle::Clocks256)),
+            Err(pwm::ConfigError::Divisor)
+        ),
     );
     hwtest::skip("PWMX 16-bit cycle", "not in this HAL");
-    hwtest::skip("PWMX several channels at once", "Pwm::channel borrows the block mutably");
+    hwtest::skip(
+        "PWMX several channels at once",
+        "Pwm::channel borrows the block mutably",
+    );
 
     hwtest::done("pwm")
 }

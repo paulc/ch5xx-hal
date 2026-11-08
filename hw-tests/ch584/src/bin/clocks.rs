@@ -25,7 +25,8 @@ use hal::timer::counter::Counter;
 use hal::timer::PeriodTicks;
 use hal::{pac, peripherals, rcc};
 use hwtest::check;
-use {panic_halt as _, qingke_rt::entry};
+use panic_halt as _;
+use qingke_rt::entry;
 
 /// The longest TMR period: 0.86 s at 78 MHz.
 const PERIOD: u32 = (1 << 26) - 1;
@@ -70,12 +71,7 @@ fn report(name: &str, tmr: &Counter<'_, peripherals::TMR1>, check_delay: bool) {
     delay.delay_ms(20);
     let ticks = ticks_between(t0, tmr.count()) as u64;
     let us = ticks * 1_000_000 / hz as u64;
-    check!(
-        (19_600..=20_400).contains(&us),
-        "{}: delay_ms(20) took {} us",
-        name,
-        us
-    );
+    check!((19_600..=20_400).contains(&us), "{}: delay_ms(20) took {} us", name, us);
 }
 
 #[entry]
@@ -83,7 +79,11 @@ fn main() -> ! {
     let p = hal::init(rcc::Config::HSE_PLL_62_4MHZ.into());
     let tmr = Counter::new(p.TMR1, PeriodTicks::new(PERIOD).unwrap());
     hwtest::sdi_enable();
-    check!(rcc::clocks().sysclk.0 == 62_400_000, "init HSE_PLL_62_4MHZ: clocks() {} Hz", rcc::clocks().sysclk.0);
+    check!(
+        rcc::clocks().sysclk.0 == 62_400_000,
+        "init HSE_PLL_62_4MHZ: clocks() {} Hz",
+        rcc::clocks().sysclk.0
+    );
     report("HSE_PLL_62_4MHZ", &tmr, true);
 
     let presets: [(&str, rcc::Config, u32); 4] = [

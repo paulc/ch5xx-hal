@@ -41,7 +41,11 @@ async fn main(spawner: Spawner) -> ! {
     let t0 = Instant::now();
     let r = with_timeout(Duration::from_millis(50), core::future::pending::<()>()).await;
     let dt = t0.elapsed().as_micros();
-    check!(r.is_err() && (50_000..52_000).contains(&dt), "with_timeout 50 ms: after {} us", dt);
+    check!(
+        r.is_err() && (50_000..52_000).contains(&dt),
+        "with_timeout 50 ms: after {} us",
+        dt
+    );
 
     // 20 short timers: how late does a 1 ms timer fire?
     let mut worst = 0;

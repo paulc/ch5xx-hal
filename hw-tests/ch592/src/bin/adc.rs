@@ -20,7 +20,8 @@ use hal::adc::{Adc, Config, Gain, SampleClock};
 use hal::gpio::{Input, Pull};
 use hal::pac;
 use hwtest::check;
-use {panic_halt as _, qingke_rt::entry};
+use panic_halt as _;
+use qingke_rt::entry;
 
 const VREF_MV: i32 = 1050;
 const MID: i32 = 0x800;
@@ -112,7 +113,11 @@ fn main() -> ! {
         match gain {
             Gain::Div4 => {
                 let mv = millivolts(hi, gain);
-                check!((2900..3700).contains(&mv), "PA15 high at 1/4, mV in 2900..3700 ({})", mv);
+                check!(
+                    (2900..3700).contains(&mv),
+                    "PA15 high at 1/4, mV in 2900..3700 ({})",
+                    mv
+                );
             }
             Gain::Unity => {
                 check!(hi >= 4090, "PA15 high at unity saturates ({})", hi);

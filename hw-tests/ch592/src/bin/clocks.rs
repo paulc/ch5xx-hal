@@ -21,12 +21,13 @@
 
 use ch5xx_hal as hal;
 use hal::delay::Delay;
+use hal::time::Hertz;
 use hal::timer::counter::Counter;
 use hal::timer::PeriodTicks;
-use hal::time::Hertz;
 use hal::{pac, peripherals, rcc};
 use hwtest::check;
-use {panic_halt as _, qingke_rt::entry};
+use panic_halt as _;
+use qingke_rt::entry;
 
 /// The longest TMR period: 0.84 s at 80 MHz.
 const PERIOD: u32 = (1 << 26) - 1;
@@ -71,12 +72,7 @@ fn report(name: &str, tmr: &Counter<'_, peripherals::TMR1>, check_delay: bool) {
     delay.delay_ms(20);
     let ticks = ticks_between(t0, tmr.count()) as u64;
     let us = ticks * 1_000_000 / hz as u64;
-    check!(
-        (19_600..=20_400).contains(&us),
-        "{}: delay_ms(20) took {} us",
-        name,
-        us
-    );
+    check!((19_600..=20_400).contains(&us), "{}: delay_ms(20) took {} us", name, us);
 }
 
 #[entry]
@@ -84,13 +80,25 @@ fn main() -> ! {
     let p = hal::init(rcc::Config::PLL_60MHZ.into());
     let tmr = Counter::new(p.TMR1, PeriodTicks::new(PERIOD).unwrap());
     hwtest::sdi_enable();
-    check!(rcc::clocks().sysclk.0 == 60_000_000, "init PLL_60MHZ: clocks() {} Hz", rcc::clocks().sysclk.0);
+    check!(
+        rcc::clocks().sysclk.0 == 60_000_000,
+        "init PLL_60MHZ: clocks() {} Hz",
+        rcc::clocks().sysclk.0
+    );
     report("PLL_60MHZ", &tmr, true);
 
     let presets: [(&str, rcc::Config, u32); 5] = [
         ("PLL_24MHZ", rcc::Config::PLL_24MHZ, 24_000_000),
-        ("hse_nearest(16 MHz)", rcc::Config::hse_nearest(Hertz(16_000_000)), 16_000_000),
-        ("hse_nearest(6.4 MHz)", rcc::Config::hse_nearest(Hertz(6_400_000)), 6_400_000),
+        (
+            "hse_nearest(16 MHz)",
+            rcc::Config::hse_nearest(Hertz(16_000_000)),
+            16_000_000,
+        ),
+        (
+            "hse_nearest(6.4 MHz)",
+            rcc::Config::hse_nearest(Hertz(6_400_000)),
+            6_400_000,
+        ),
         ("PLL_48MHZ", rcc::Config::PLL_48MHZ, 48_000_000),
         ("PLL_80MHZ", rcc::Config::PLL_80MHZ, 80_000_000),
     ];

@@ -146,7 +146,11 @@ async fn main(spawner: Spawner) -> ! {
             seen,
             rounds
         );
-        check!(seen > before, "  ticker still woken in the last second ({})", seen - before);
+        check!(
+            seen > before,
+            "  ticker still woken in the last second ({})",
+            seen - before
+        );
         check!(rounds > 1000, "  ping-pong still running ({})", rounds);
     }
     hal::interrupt::typelevel::TMR0::disable();

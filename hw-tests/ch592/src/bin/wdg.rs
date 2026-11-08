@@ -20,7 +20,8 @@ use embassy_time::{Duration, Instant};
 use hal::pac;
 use hal::watchdog::{self, ResetCause, Watchdog};
 use hwtest::check;
-use {panic_halt as _, qingke_rt::entry};
+use panic_halt as _;
+use qingke_rt::entry;
 
 /// Second boot: the high nibble marks the stage, the low nibble carries the
 /// first boot's failures (saturating).
@@ -43,7 +44,9 @@ fn near(ms: u64, want: u64) -> bool {
 }
 
 fn keep(v: u8) {
-    pac::SYSTEM_CONTROL.glob_reset_keep().write(|w| w.set_glob_reset_keep(v));
+    pac::SYSTEM_CONTROL
+        .glob_reset_keep()
+        .write(|w| w.set_glob_reset_keep(v));
 }
 
 #[entry]
@@ -86,7 +89,12 @@ fn main() -> ! {
     let t0 = Instant::now();
     while !wdg.overflowed() && t0.elapsed() < Duration::from_millis(2000) {}
     let ms = t0.elapsed().as_millis();
-    check!(near(ms, counts_ms(256)), "overflow from reload 0 after ~{} ms ({} ms)", counts_ms(256), ms);
+    check!(
+        near(ms, counts_ms(256)),
+        "overflow from reload 0 after ~{} ms ({} ms)",
+        counts_ms(256),
+        ms
+    );
     check!(wdg.overflowed(), "still alive with reset disabled");
     wdg.clear_overflow();
     check!(!wdg.overflowed(), "clear_overflow clears it");
@@ -96,7 +104,12 @@ fn main() -> ! {
     let t0 = Instant::now();
     while !wdg.overflowed() && t0.elapsed() < Duration::from_millis(2000) {}
     let ms = t0.elapsed().as_millis();
-    check!(near(ms, counts_ms(64)), "overflow from reload 192 after ~{} ms ({} ms)", counts_ms(64), ms);
+    check!(
+        near(ms, counts_ms(64)),
+        "overflow from reload 192 after ~{} ms ({} ms)",
+        counts_ms(64),
+        ms
+    );
     wdg.feed(192);
     check!(!wdg.overflowed(), "feed clears the overflow");
 

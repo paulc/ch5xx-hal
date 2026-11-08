@@ -86,16 +86,26 @@ async fn main(_spawner: Spawner) -> ! {
     let t = Instant::now();
     let r = spi.write_dma(TX5000.take().unwrap()).ok().unwrap().wait(Irqs).await;
     let us = t.elapsed().as_micros();
-    check!(r.is_ok() && (39_500..42_500).contains(&us), "DMA write 5000 B: {} us", us);
+    check!(
+        r.is_ok() && (39_500..42_500).contains(&us),
+        "DMA write 5000 B: {} us",
+        us
+    );
 
     let config = spi::Config::new(Hertz::mhz(15));
     let rate = spi.set_config(config);
     check!(rate.is_ok(), "set_config 15 MHz");
     let mut c1 = config;
     c1.mode = embedded_hal::spi::MODE_1;
-    check!(matches!(spi.set_config(c1), Err(spi::ConfigError::Mode)), "MODE_1 rejected");
     check!(
-        matches!(spi.set_config(spi::Config::new(Hertz::mhz(40))), Err(spi::ConfigError::Frequency)),
+        matches!(spi.set_config(c1), Err(spi::ConfigError::Mode)),
+        "MODE_1 rejected"
+    );
+    check!(
+        matches!(
+            spi.set_config(spi::Config::new(Hertz::mhz(40))),
+            Err(spi::ConfigError::Frequency)
+        ),
         "40 MHz (above HCLK / 2) rejected"
     );
     spi.set_config(config).unwrap();

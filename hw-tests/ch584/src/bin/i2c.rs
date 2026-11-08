@@ -47,7 +47,8 @@ fn hold(n: u32, low: bool) {
     let g = pac::GPIO;
     critical_section::with(|_| {
         g.pb_pu().modify(|w| if low { w.0 &= !(1 << n) } else { w.0 |= 1 << n });
-        g.pb_pd_drv().modify(|w| if low { w.0 |= 1 << n } else { w.0 &= !(1 << n) });
+        g.pb_pd_drv()
+            .modify(|w| if low { w.0 |= 1 << n } else { w.0 &= !(1 << n) });
     });
     // Let the pull settle.
     Delay.delay_us(20);
@@ -94,7 +95,13 @@ async fn main(_spawner: Spawner) -> ! {
         )
         .await;
         let us = t0.elapsed().as_micros();
-        hwtest::println!("  write(0x55, [0xaa]) = {:?} in {} us, low samples: SCL {} SDA {}", r, us, scl, sda);
+        hwtest::println!(
+            "  write(0x55, [0xaa]) = {:?} in {} us, low samples: SCL {} SDA {}",
+            r,
+            us,
+            scl,
+            sda
+        );
         check!(
             r == Err(Error::NoAcknowledge(NoAcknowledgeSource::Address)),
             "  async write, no device: address NACK"
@@ -119,8 +126,13 @@ async fn main(_spawner: Spawner) -> ! {
         check!(r == Err(Error::Address), "  10-bit address refused: {:?}", r);
     }
 
-    let mut i2c =
-        I2c::new_blocking::<0>(p.I2C0.reborrow(), p.PB13.reborrow(), p.PB12.reborrow(), i2c::Config::default()).unwrap();
+    let mut i2c = I2c::new_blocking::<0>(
+        p.I2C0.reborrow(),
+        p.PB13.reborrow(),
+        p.PB12.reborrow(),
+        i2c::Config::default(),
+    )
+    .unwrap();
 
     // SDA held low at the start: the peripheral sees the bus busy.
     hold(SDA, true);
@@ -129,7 +141,12 @@ async fn main(_spawner: Spawner) -> ! {
     let r = i2c.blocking_write(0x55, &[]);
     let us = t0.elapsed().as_micros();
     hold(SDA, false);
-    check!(r.is_err() && !nack(&r), "SDA held low: {:?} in {} us (an error other than NACK)", r, us);
+    check!(
+        r.is_err() && !nack(&r),
+        "SDA held low: {:?} in {} us (an error other than NACK)",
+        r,
+        us
+    );
     let r = i2c.blocking_write(0x55, &[]);
     check!(nack(&r), "  and the bus works again: {:?}", r);
 
@@ -148,8 +165,16 @@ async fn main(_spawner: Spawner) -> ! {
 
     // Above the 36 MHz FREQ limit the driver refuses.
     unsafe { hal::rcc::set_config(hal::rcc::Config::HSE_PLL_62_4MHZ) };
-    let r = I2c::new_blocking::<0>(p.I2C0.reborrow(), p.PB13.reborrow(), p.PB12.reborrow(), i2c::Config::default());
-    check!(matches!(r, Err(i2c::ConfigError::Clock)), "Fsys 62.4 MHz refused (ConfigError::Clock)");
+    let r = I2c::new_blocking::<0>(
+        p.I2C0.reborrow(),
+        p.PB13.reborrow(),
+        p.PB12.reborrow(),
+        i2c::Config::default(),
+    );
+    check!(
+        matches!(r, Err(i2c::ConfigError::Clock)),
+        "Fsys 62.4 MHz refused (ConfigError::Clock)"
+    );
 
     hwtest::done("i2c")
 }
