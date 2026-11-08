@@ -92,7 +92,9 @@ async fn main(_spawner: Spawner) -> ! {
     let c = cnt.count();
     check!(c < 60_000 / 10, "counter: restart starts from 0 (count {})", c);
 
-    // wait: wakes once a period.
+    // wait: wakes once a period. The line printed above takes longer than a
+    // period: drop the event it left, or the first wait returns at once.
+    let _ = cnt.elapsed();
     let t0 = Instant::now();
     for _ in 0..10 {
         cnt.wait(Irqs).await;
