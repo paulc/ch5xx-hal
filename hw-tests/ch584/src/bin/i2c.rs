@@ -125,6 +125,22 @@ async fn main(_spawner: Spawner) -> ! {
         check!(r == Err(Error::Address), "  10-bit address refused: {:?}", r);
     }
 
+    // Above the 36 MHz FREQ limit the driver refuses.
+    unsafe { hal::rcc::set_config(hal::rcc::Config::HSE_PLL_62_4MHZ) };
+    let r = I2c::new_blocking::<0>(
+        p.I2C0.reborrow(),
+        p.PB13.reborrow(),
+        p.PB12.reborrow(),
+        i2c::Config::default(),
+    );
+    check!(
+        matches!(r, Err(i2c::ConfigError::Clock)),
+        "Fsys 62.4 MHz refused (ConfigError::Clock)"
+    );
+    drop(r);
+
+    // The bus held low last: on this HAL it can hang the blocking write.
+    unsafe { hal::rcc::set_config(hal::rcc::Config::HSE_32MHZ) };
     let mut i2c = I2c::new_blocking::<0>(
         p.I2C0.reborrow(),
         p.PB13.reborrow(),
@@ -132,6 +148,18 @@ async fn main(_spawner: Spawner) -> ! {
         i2c::Config::default(),
     )
     .unwrap();
+
+    // SCL held low: the start never completes.
+    hold(SCL, true);
+    check!(!level(SCL), "SCL pulled down reads low");
+    let t0 = Instant::now();
+    let r = i2c.blocking_write(0x55, &[]);
+    let us = t0.elapsed().as_micros();
+    hold(SCL, false);
+    check!(r == Err(Error::Timeout), "SCL held low: {:?} in {} us", r, us);
+    check!((900..3_000).contains(&us), "  after about 1 ms: {} us", us);
+    let r = i2c.blocking_write(0x55, &[]);
+    check!(nack(&r), "  and the bus works again: {:?}", r);
 
     // SDA held low at the start: the peripheral sees the bus busy.
     hold(SDA, true);
@@ -148,32 +176,6 @@ async fn main(_spawner: Spawner) -> ! {
     );
     let r = i2c.blocking_write(0x55, &[]);
     check!(nack(&r), "  and the bus works again: {:?}", r);
-
-    // SCL held low: the start never completes.
-    hold(SCL, true);
-    check!(!level(SCL), "SCL pulled down reads low");
-    let t0 = Instant::now();
-    let r = i2c.blocking_write(0x55, &[]);
-    let us = t0.elapsed().as_micros();
-    hold(SCL, false);
-    check!(r == Err(Error::Timeout), "SCL held low: {:?} in {} us", r, us);
-    check!((900..3_000).contains(&us), "  after about 1 ms: {} us", us);
-    let r = i2c.blocking_write(0x55, &[]);
-    check!(nack(&r), "  and the bus works again: {:?}", r);
-    drop(i2c);
-
-    // Above the 36 MHz FREQ limit the driver refuses.
-    unsafe { hal::rcc::set_config(hal::rcc::Config::HSE_PLL_62_4MHZ) };
-    let r = I2c::new_blocking::<0>(
-        p.I2C0.reborrow(),
-        p.PB13.reborrow(),
-        p.PB12.reborrow(),
-        i2c::Config::default(),
-    );
-    check!(
-        matches!(r, Err(i2c::ConfigError::Clock)),
-        "Fsys 62.4 MHz refused (ConfigError::Clock)"
-    );
 
     hwtest::done("i2c")
 }
