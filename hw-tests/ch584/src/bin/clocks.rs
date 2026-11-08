@@ -83,6 +83,15 @@ fn main() -> ! {
         "init HSE_PLL_62_4MHZ: clocks() {} Hz",
         rcc::clocks().sysclk.0
     );
+    // The HAL's timeouts count the core's `cycle` CSR: does it run?
+    let (c0, t0) = (hwtest::cycles(), tmr.count());
+    while ticks_between(t0, tmr.count()) < rcc::clocks().sysclk.0 / 1000 {}
+    let n = hwtest::cycles().wrapping_sub(c0);
+    check!(
+        n.abs_diff(rcc::clocks().sysclk.0 / 1000) < rcc::clocks().sysclk.0 / 10_000,
+        "cycle CSR counts HCLK: {} in 1 ms",
+        n
+    );
     report("HSE_PLL_62_4MHZ", &tmr, true);
 
     let presets: [(&str, rcc::Config, u32); 4] = [
