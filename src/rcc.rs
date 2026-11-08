@@ -46,8 +46,7 @@
 //! least by 2, so 16 MHz is the maximum here), `01` divides the PLL, and `11`
 //! selects 32 kHz. The reset default is 32 MHz / 5 = 6.4 MHz. The Flash timing
 //! byte in `R8_FLASH_CFG` is part of a clock change on this die, and the
-//! safe-access window is only ~16 `Tsys`, so `with_safe_access` flushes the
-//! instruction prefetch around it.
+//! safe-access window is only ~16 `Tsys`.
 //!
 //! # Defaults
 //!
@@ -68,6 +67,13 @@
 //! closes itself (0x00 closes it early). [`set_config`] masks interrupts around
 //! every window so a handler cannot consume it, and reads `CLK_CFG` back to
 //! prove the write landed.
+//!
+//! `with_safe_access` flushes the instruction prefetch (`fence.i`) after
+//! opening and after closing every window, as WCH's `sys_safe_access_enable`
+//! and `sys_safe_access_disable` do (`SAFEOPERATE`) on every die. Without it,
+//! on a CH584F, a protected write from some code layouts was dropped on every
+//! attempt, and `Rtc::set_datetime` hung. The refetch has to fit in the
+//! window, so it relies on the FlashROM timing that [`set_config`] sets.
 //!
 //! # Frequencies
 //!
@@ -895,16 +901,14 @@ pub(crate) fn with_safe_access<R>(f: impl FnOnce() -> R) -> R {
         let sig = pac::SYSTEM_CONTROL.safe_access_sig();
         sig.write(|w| w.set_safe_access_sig(SAFE_ACCESS_SIG1));
         sig.write(|w| w.set_safe_access_sig(SAFE_ACCESS_SIG2));
-        // CH592's window is only ~16 Tsys and WCH flushes the instruction
-        // prefetch before the protected access (`SAFEOPERATE`); do the same so
-        // prefetched instructions cannot outlive the window.
-        #[cfg(ch592)]
+        // WCH flushes the instruction prefetch around the protected access on
+        // every die (`SAFEOPERATE`); without it some code layouts lose the
+        // write every time.
         unsafe {
             core::arch::asm!("fence.i");
         }
         let result = f();
         sig.write(|w| w.set_safe_access_sig(SAFE_ACCESS_SIG0));
-        #[cfg(ch592)]
         unsafe {
             core::arch::asm!("fence.i");
         }
