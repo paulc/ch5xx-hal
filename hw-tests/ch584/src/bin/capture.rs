@@ -221,6 +221,8 @@ fn dump(got: &[Result<Capture, Error>]) {
 async fn main(_spawner: Spawner) -> ! {
     let mut p = hal::init(hal::rcc::Config::HSE_PLL_62_4MHZ.into());
     hwtest::sdi_enable();
+    // Calibrate `hwtest::delay_us` now, not inside a timed sequence.
+    hwtest::delay_us(1);
     let mut delay = Delay;
     let mut got = [Ok(Capture::Timeout); N];
     let burst = [b'U'; 8];
@@ -310,6 +312,9 @@ async fn main(_spawner: Spawner) -> ! {
             n > 0 && got[..n].iter().all(|r| *r == Ok(Capture::Timeout)),
             n as i64,
         );
+        if !(n > 0 && got[..n].iter().all(|r| *r == Ok(Capture::Timeout))) {
+            dump(&got[..n]);
+        }
     }
 
     // ---- TMR3 (PB22), TMR1 (PB10) and TMR2 (PB11), driven as GPIO outputs.
@@ -329,32 +334,56 @@ async fn main(_spawner: Spawner) -> ! {
             drive($bit, false);
             g.pb_dir().modify(|w| w.0 |= 1 << $bit);
             let mut dec = Decoder::new(edge, timeout(60_000));
+            // `hwtest::delay_us`: `Delay` adds its own overhead.
             for i in 0..6 {
-                delay.delay_us(50);
+                hwtest::delay_us(50);
                 drive($bit, i % 2 == 0);
             }
             drive($bit, false);
-            let n = collect(&mut cap, &mut dec, &mut got[..5]);
-            let ok = n == 5
-                && got[..5].iter().enumerate().all(|(i, r)| match r {
-                    // 50 us is 3120 ticks, plus the loop.
-                    Ok(Capture::High(t)) => i % 2 == 0 && (3000..4000).contains(t),
-                    Ok(Capture::Low(t)) => i % 2 == 1 && (3000..4000).contains(t),
-                    _ => false,
-                });
-            c_check(concat!($name, ": 5 levels of 50 us"), ok, n as i64);
+            let n = collect(&mut cap, &mut dec, &mut got[..8]);
+            // Held low: a timeout every 1 ms, after any level still queued.
+            // Read before printing, which takes longer than the 8-deep FIFO of
+            // timeouts lasts.
+            let mut timed_out = false;
+            let mut last = None;
+            for _ in 0..4 {
+                last = next(&mut cap, &mut dec);
+                if last == Some(Ok(Capture::Timeout)) {
+                    timed_out = true;
+                    break;
+                }
+                if !matches!(last, Some(Ok(_))) {
+                    break;
+                }
+            }
+            // The pin routing is what matters here: at least four alternating
+            // levels of about 50 us (40..130 us, as the busy loop is only
+            // roughly calibrated), ignoring a short partial first level.
+            let mut levels = 0;
+            let mut prev = None;
+            let mut alternate = true;
+            for r in &got[..n] {
+                let (high, t) = match r {
+                    Ok(Capture::High(t)) => (true, *t),
+                    Ok(Capture::Low(t)) => (false, *t),
+                    _ => continue,
+                };
+                let us = t as u64 * 1_000_000 / hal::rcc::clocks().sysclk.0 as u64;
+                if us < 20 {
+                    continue;
+                }
+                alternate &= (40..130).contains(&us) && prev != Some(high);
+                prev = Some(high);
+                levels += 1;
+            }
+            let ok = levels >= 4 && alternate;
+            c_check(concat!($name, ": alternating levels of about 50 us"), ok, levels);
             if !ok {
                 dump(&got[..n]);
             }
-            // Held low: a timeout every 1 ms.
-            let r = next(&mut cap, &mut dec);
-            c_check(
-                concat!($name, ": timeout with the input held low"),
-                r == Some(Ok(Capture::Timeout)),
-                0,
-            );
-            if r != Some(Ok(Capture::Timeout)) {
-                hwtest::println!("    {:?}", r);
+            c_check(concat!($name, ": timeout with the input held low"), timed_out, 0);
+            if !timed_out {
+                hwtest::println!("    {:?}", last);
             }
             g.pb_dir().modify(|w| w.0 &= !(1 << $bit));
         }};
@@ -445,6 +474,9 @@ async fn main(_spawner: Spawner) -> ! {
             got[..n].iter().any(|r| *r == Err(Error::FifoOverrun)),
             n as i64,
         );
+        if !got[..n].iter().any(|r| *r == Err(Error::FifoOverrun)) {
+            dump(&got[..n.min(8)]);
+        }
 
         // Dropping the transfer stops the DMA (no edges: it would take 48 ms).
         let mut t = cap.read(raw).ok().unwrap();
@@ -466,7 +498,7 @@ async fn main(_spawner: Spawner) -> ! {
         g.pb_dir().modify(|w| w.0 |= 1 << 11);
         let t = cap.read(RAW8.take().unwrap()).ok().unwrap();
         for i in 0..6 {
-            delay.delay_us(50);
+            hwtest::delay_us(50);
             drive(11, i % 2 == 0);
         }
         drive(11, false);
@@ -482,7 +514,11 @@ async fn main(_spawner: Spawner) -> ! {
         for (i, m) in raw.iter().filter_map(|&w| dec.push(CaptureWord(w))).enumerate() {
             n += 1;
             ok &= match (i, m) {
-                (0 | 2 | 4, Capture::High(t)) | (1 | 3, Capture::Low(t)) => (3000..4000).contains(&t),
+                // About 50 us (40..130 us: the busy loop is only roughly
+                // calibrated).
+                (0 | 2 | 4, Capture::High(t)) | (1 | 3, Capture::Low(t)) => {
+                    (40..130).contains(&(t as u64 * 1_000_000 / hal::rcc::clocks().sysclk.0 as u64))
+                }
                 (5 | 6, Capture::Timeout) => true,
                 _ => false,
             };
