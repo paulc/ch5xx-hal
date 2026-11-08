@@ -59,68 +59,111 @@ async fn main(_spawner: Spawner) -> ! {
         if jumper { "yes" } else { "no (TX-only tests)" }
     );
 
-    let uart = Uart::new::<1>(p.UART0, p.PA15, p.PA14, Irqs, uart::Config::new(1_000_000)).unwrap();
-    let (mut tx, mut rx) = uart.split();
-
-    let mut data = [0u8; 64];
-    for (i, b) in data.iter_mut().enumerate() {
-        *b = (i as u8).wrapping_mul(37);
-    }
-
-    if !jumper {
-        check!(tx.write(&data).await.is_ok(), "async write 64 bytes");
-        check!(tx.flush().await.is_ok(), "flush");
-
-        // Async RX without a wire: fill the RX FIFO through the internal
-        // loopback (which masks the interrupt), then leave loopback and let
-        // the interrupt-driven read collect it. 6 bytes is above the RX
-        // trigger (4), so this exercises both the RX-ready interrupt and the
-        // FIFO timeout.
-        let mcr = hal::pac::UART0.mcr();
-        mcr.modify(|w| w.set_mcr_loop(true));
-        tx.blocking_write(b"loop!\n").ok();
-        tx.blocking_flush().ok();
-        delay.delay_us(100);
-        mcr.modify(|w| w.set_mcr_loop(false));
-        let mut buf = [0u8; 32];
-        let n = read_some_n(&mut rx, &mut buf, 6).await;
-        check!(
-            n == 6 && &buf[..6] == b"loop!\n",
-            "async read_some (FIFO preload): {} bytes",
-            n
-        );
-        // Nothing more: read_some must keep waiting.
-        let r = with_timeout(Duration::from_millis(20), rx.read_some(&mut buf)).await;
-        check!(r.is_err(), "read_some waits with nothing to read");
-    } else {
-        // 64 bytes each way at once: more than the FIFOs hold, so both sides
-        // have to wait on interrupts.
-        let mut got = [0u8; 64];
-        let (w, r) = join(tx.write(&data), rx.read(&mut got)).await;
-        check!(w.is_ok() && r.is_ok() && got == data, "async write+read 64 bytes");
-
-        // read_some returns a prefix as soon as bytes arrive.
-        let mut buf = [0u8; 32];
-        let (_, n) = join(tx.write(b"hello, ch584!"), read_some_n(&mut rx, &mut buf, 13)).await;
-        check!(n == 13 && &buf[..13] == b"hello, ch584!", "read_some 13 bytes: {}", n);
-        let (_, n) = join(tx.write(b"12345678"), read_some_n(&mut rx, &mut buf, 8)).await;
-        check!(n == 8 && &buf[..8] == b"12345678", "read_some 8 bytes: {}", n);
-
-        // A cancelled read_some consumes nothing.
-        let r = with_timeout(Duration::from_millis(5), rx.read_some(&mut buf)).await;
-        let (_, n) = join(
-            async {
-                Timer::after_millis(1).await;
-                tx.write(b"abc").await
-            },
-            read_some_n(&mut rx, &mut buf, 3),
+    // HCLK / 64 (DL = 8), about 1 Mbaud: the HAL refuses 1 Mbaud itself at
+    // 62.4 MHz (2.5% off).
+    // With the jumper, 115200 too: it tells a slow interrupt path (overruns
+    // at the fast rate only) from a broken one.
+    let fast = hal::rcc::clocks().sysclk.0 / 64;
+    let rates: &[u32] = if jumper { &[115_200, fast] } else { &[fast] };
+    for &baud in rates {
+        hwtest::println!("{} baud", baud);
+        let uart = Uart::new::<1>(
+            p.UART0.reborrow(),
+            p.PA15.reborrow(),
+            p.PA14.reborrow(),
+            Irqs,
+            uart::Config::new(baud),
         )
-        .await;
-        check!(
-            r.is_err() && n == 3 && &buf[..3] == b"abc",
-            "read_some after a cancelled read_some"
-        );
-        check!(tx.flush().await.is_ok(), "flush");
+        .unwrap();
+        let (mut tx, mut rx) = uart.split();
+
+        let mut data = [0u8; 64];
+        for (i, b) in data.iter_mut().enumerate() {
+            *b = (i as u8).wrapping_mul(37);
+        }
+
+        if !jumper {
+            check!(tx.write(&data).await.is_ok(), "async write 64 bytes");
+            check!(tx.flush().await.is_ok(), "flush");
+
+            // Async RX without a wire: fill the RX FIFO through the internal
+            // loopback (which masks the interrupt), then leave loopback and let
+            // the interrupt-driven read collect it. 6 bytes is above the RX
+            // trigger (4), so this exercises both the RX-ready interrupt and the
+            // FIFO timeout.
+            let mcr = hal::pac::UART0.mcr();
+            mcr.modify(|w| w.set_mcr_loop(true));
+            tx.blocking_write(b"loop!\n").ok();
+            tx.blocking_flush().ok();
+            delay.delay_us(100);
+            mcr.modify(|w| w.set_mcr_loop(false));
+            let mut buf = [0u8; 32];
+            let n = read_some_n(&mut rx, &mut buf, 6).await;
+            check!(
+                n == 6 && &buf[..6] == b"loop!\n",
+                "async read_some (FIFO preload): {} bytes",
+                n
+            );
+            // Nothing more: read_some must keep waiting.
+            let r = with_timeout(Duration::from_millis(20), rx.read_some(&mut buf)).await;
+            check!(r.is_err(), "read_some waits with nothing to read");
+        } else {
+            // 64 bytes each way at once: more than the FIFOs hold, so both sides
+            // have to wait on interrupts.
+            // Blocking first, which needs no interrupt: does a byte arrive at all?
+            tx.blocking_write(b"ab").ok();
+            tx.blocking_flush().ok();
+            delay.delay_us(100);
+            let rfc = hal::pac::UART0.rfc().read().rfc();
+            check!(
+                rfc == 2,
+                "blocking write 2 bytes over the jumper: RX FIFO holds {}",
+                rfc
+            );
+            let mut two = [0u8; 2];
+            if rfc > 0 {
+                let r = rx.blocking_read(&mut two[..rfc.min(2) as usize]);
+                hwtest::println!("  blocking read: {:?} {:02x?}", r, two);
+            }
+
+            let mut got = [0u8; 64];
+            let (w, r) = join(
+                tx.write(&data),
+                with_timeout(Duration::from_millis(50), rx.read(&mut got)),
+            )
+            .await;
+            let same = got.iter().zip(data.iter()).take_while(|(a, b)| a == b).count();
+            check!(
+                w.is_ok() && matches!(r, Ok(Ok(()))) && got == data,
+                "async write+read 64 bytes: write {:?}, read {:?}, first {} bytes match",
+                w,
+                r,
+                same
+            );
+
+            // read_some returns a prefix as soon as bytes arrive.
+            let mut buf = [0u8; 32];
+            let (_, n) = join(tx.write(b"hello, ch584!"), read_some_n(&mut rx, &mut buf, 13)).await;
+            check!(n == 13 && &buf[..13] == b"hello, ch584!", "read_some 13 bytes: {}", n);
+            let (_, n) = join(tx.write(b"12345678"), read_some_n(&mut rx, &mut buf, 8)).await;
+            check!(n == 8 && &buf[..8] == b"12345678", "read_some 8 bytes: {}", n);
+
+            // A cancelled read_some consumes nothing.
+            let r = with_timeout(Duration::from_millis(5), rx.read_some(&mut buf)).await;
+            let (_, n) = join(
+                async {
+                    Timer::after_millis(1).await;
+                    tx.write(b"abc").await
+                },
+                read_some_n(&mut rx, &mut buf, 3),
+            )
+            .await;
+            check!(
+                r.is_err() && n == 3 && &buf[..3] == b"abc",
+                "read_some after a cancelled read_some"
+            );
+            check!(tx.flush().await.is_ok(), "flush");
+        }
     }
 
     hwtest::done("uart_async")
