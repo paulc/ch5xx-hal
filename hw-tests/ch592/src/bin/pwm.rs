@@ -228,19 +228,25 @@ async fn main(_spawner: Spawner) -> ! {
             check_pwm("PWM9 12.5%", P::B(7), per, 125);
             ch.set_duty_cycle_fraction(1, 2).unwrap();
             check_pwm("PWM9 SetDutyCycle 1/2", P::B(7), per, 500);
-            ch.set_duty(255);
-            check_pwm("PWM9 duty 255 of 256", P::B(7), per, 996);
         }
         // Dropping the channel stops the output; the pin is left a pulled-up
         // input.
         check_constant("PWM9 dropped: pin idles (pull-up)", P::B(7), true);
     }
-    // ---- PWMX, 63-clock cycle: HCLK / 10 / 63 = 99 kHz.
+    // ---- PWMX, slow enough for the polled measurement to see one-clock
+    // levels: duty 255 of 256 is low for one PWMX clock, 200 HCLK.
     {
-        let mut pwmx = Pwm::new(p.PWMX.reborrow(), pwm::Config::new(10, Cycle::Clocks63)).unwrap();
+        let mut pwmx = Pwm::new(p.PWMX.reborrow(), pwm::Config::new(200, Cycle::Clocks256)).unwrap();
+        let mut ch = pwmx.channel(p.PB7.reborrow(), Polarity::ActiveHigh);
+        ch.set_duty(255);
+        check_pwm("PWM9 duty 255 of 256", P::B(7), 200 * 256, 996);
+    }
+    // ---- PWMX, 63-clock cycle.
+    {
+        let mut pwmx = Pwm::new(p.PWMX.reborrow(), pwm::Config::new(100, Cycle::Clocks63)).unwrap();
         let mut ch = pwmx.channel(p.PA12.reborrow(), Polarity::ActiveHigh);
         ch.set_duty(21);
-        check_pwm("PWM4 63-clock cycle, 21/63", P::A(12), 630, 333);
+        check_pwm("PWM4 63-clock cycle, 21/63", P::A(12), 100 * 63, 333);
     }
     hwtest::check(
         "PWMX divisor 0 refused",
