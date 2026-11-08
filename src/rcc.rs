@@ -33,9 +33,9 @@
 //! 32 kHz mode is deliberately not offered: it requires the whole program in
 //! RAM.
 //!
-//! On CH585/CH584 the FlashROM timing (`FLASH_SCK` bit 4, `FLASH_CFG`) is part
-//! of every switch, as in WCH's `SetSysClock` (`CH58x_sys.c`). Left at its
-//! reset value (0x07), code runs from flash at about half speed above 26 MHz.
+//! On CH585/CH584 the FlashROM timing (`FLASH_CFG`) is part of every switch,
+//! as in WCH's `SetSysClock` (`CH58x_sys.c`). Left at its reset value (0x07),
+//! code runs from flash at about half speed above 26 MHz.
 //! The switch runs from RAM, so nothing is fetched from flash while its clock
 //! and timing change.
 //!
@@ -632,9 +632,8 @@ pub unsafe fn set_config(config: Config) -> Clocks {
     cfg.set_pll_gate_time(false);
     #[cfg(any(ch584, ch585))]
     {
-        let (sck4, flash_cfg) = ch585_raw::flash_timing(cfg);
-        let sck = core::ptr::read_volatile(ch585_raw::FLASH_SCK);
-        let sck = if sck4 { sck | 1 << 4 } else { sck & !(1 << 4) };
+        let flash_cfg = ch585_raw::flash_timing(cfg);
+        let sck = core::ptr::read_volatile(ch585_raw::FLASH_SCK) & !(1 << 4);
         critical_section::with(|_| ch585_raw::switch(cfg.0, sck, flash_cfg));
     }
     #[cfg(not(any(ch584, ch585)))]
@@ -673,21 +672,26 @@ mod ch585_raw {
     /// `R8_FLASH_CFG`, reset value 0x07 (datasheet table 4-1).
     const FLASH_CFG: usize = 0x4000_1807;
 
-    /// `FLASH_SCK` bit 4 and `FLASH_CFG` for `cfg`, from `SetSysClock`.
-    pub fn flash_timing(cfg: crate::pac::sys::regs::ClkCfg) -> (bool, u8) {
+    /// `FLASH_CFG` for `cfg`, from `SetSysClock`.
+    ///
+    /// `SetSysClock` also sets `FLASH_SCK` bit 4 when the divider field is 0
+    /// (direct mode, and PLL / 32); the switch keeps it clear. Set with the
+    /// switch on a CH584F, the next flash by the debug probe (wlink) wrote
+    /// only the first 256 bytes and still reported success. Those clocks keep
+    /// the reset timing, as before.
+    pub fn flash_timing(cfg: crate::pac::sys::regs::ClkCfg) -> u8 {
         // A divider of 32 is encoded as 0.
         let div = cfg.clk_pll_div();
         if cfg.xrom_sclk_sel() {
             match div {
-                0 => (true, 0x07),
-                1..=9 => (false, 0x01),
-                10..=15 => (false, 0x02),
-                _ => (false, 0x07),
+                1..=9 => 0x01,
+                10..=15 => 0x02,
+                _ => 0x07,
             }
         } else if div < 8 {
-            (false, 0x51)
+            0x51
         } else {
-            (false, 0x57)
+            0x57
         }
     }
 
