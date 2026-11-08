@@ -1,0 +1,60 @@
+[package]
+name = "ch592-hw-tests"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "hwtest"
+path = "src/lib.rs"
+test = false
+bench = false
+
+[dependencies]
+ch5xx-hal = { path = "../../", features = ["ch592", "rt", "memory-x"] }
+
+panic-halt = "1.0"
+critical-section = "1.2.0"
+embedded-hal = "1.0.0"
+embedded-hal-async = "1.0.0"
+embedded-io-async = "0.7.0"
+
+qingke = "0.8.4"
+qingke-rt = "0.8.4"
+
+embassy-executor = { version = "0.10.0", features = ["executor-thread", "portable-atomic"] }
+embassy-futures = "0.1.2"
+embassy-time = { version = "0.5.1", features = ["tick-hz-1_000_000"] }
+embassy-usb = { version = "0.6.0", default-features = false }
+portable-atomic = { version = "1.11", features = ["critical-section"] }
+
+[features]
+default = ["platform-spin", "time-driver-systick"]
+time-driver-systick = ["ch5xx-hal/time-driver-systick"]
+## SysTick is then free, and `delay` busy-waits on it with a rate it measures
+## against the RTC at `init`.
+time-driver-tmr0 = ["ch5xx-hal/time-driver-tmr0"]
+## The embassy executor busy-polls (never sleeps).
+platform-spin = ["embassy-executor/platform-spin"]
+## The embassy executor sleeps in WFI between polls, as upstream's examples
+## do. Build with `--no-default-features --features platform-riscv32`.
+platform-riscv32 = ["embassy-executor/platform-riscv32"]
+
+[profile.release]
+strip = false
+debug = 2
+lto = true
+opt-level = "s"
+
+[profile.dev]
+overflow-checks = false
+
+# The same embassy checkout as the HAL's examples.
+[patch.crates-io]
+embassy-executor = { git = "https://github.com/embassy-rs/embassy", rev = "4e2fa2e3ae7c9fd62a32193f47af12f68df3df7d" }
+embassy-executor-timer-queue = { git = "https://github.com/embassy-rs/embassy", rev = "4e2fa2e3ae7c9fd62a32193f47af12f68df3df7d" }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy", rev = "4e2fa2e3ae7c9fd62a32193f47af12f68df3df7d" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy", rev = "4e2fa2e3ae7c9fd62a32193f47af12f68df3df7d" }
+embassy-time-driver = { git = "https://github.com/embassy-rs/embassy", rev = "4e2fa2e3ae7c9fd62a32193f47af12f68df3df7d" }
+embassy-time-queue-utils = { git = "https://github.com/embassy-rs/embassy", rev = "4e2fa2e3ae7c9fd62a32193f47af12f68df3df7d" }
+embassy-usb = { git = "https://github.com/embassy-rs/embassy", rev = "4e2fa2e3ae7c9fd62a32193f47af12f68df3df7d" }
+embassy-usb-driver = { git = "https://github.com/embassy-rs/embassy", rev = "4e2fa2e3ae7c9fd62a32193f47af12f68df3df7d" }

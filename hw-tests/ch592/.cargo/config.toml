@@ -1,0 +1,22 @@
+[build]
+# Not riscv32imac, though the QingKe V4C core has the A extension: an LR/SC
+# loop (compare_exchange) loses updates when an interrupt writes the same word
+# in between, and embassy's run queue is such a loop (see `wake_race`).
+# Without A, embassy and portable-atomic use critical sections.
+target = "riscv32imc-unknown-none-elf"
+
+[target.riscv32imc-unknown-none-elf]
+# `--chip` is required: wlink cannot auto-detect CH5xx parts and fails to
+# attach (error 0x55). `--speed low` is required too: at the default (high)
+# speed the probe fails to start wlink's flash routine on CH592 (WCH-LinkE
+# firmware v3.2). hw-test.sh adds --enable-sdi-print --watch-serial.
+runner = "wlink --chip CH59X --speed low flash"
+# No `+b`: CH592 has no B extension (`misa` = 0x40901105), and a `+b` build
+# traps before `main`.
+
+# For `--target riscv32imac-unknown-none-elf` (to see `wake_race` fail).
+[target.riscv32imac-unknown-none-elf]
+runner = "wlink --chip CH59X --speed low flash"
+
+[unstable]
+build-std = ["core"]
