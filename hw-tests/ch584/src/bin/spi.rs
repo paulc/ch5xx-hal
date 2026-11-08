@@ -69,26 +69,16 @@ async fn main(_spawner: Spawner) -> ! {
     let us = t.elapsed().as_micros();
     check!((7_900..8_600).contains(&us), "async write 1000 B: {} us", us);
 
-    let t = Instant::now();
-    let r = spi.write_dma(TX1000.take().unwrap()).ok().unwrap().wait(Irqs).await;
-    let us = t.elapsed().as_micros();
-    check!(r.is_ok() && (7_900..8_600).contains(&us), "DMA write 1000 B: {} us", us);
-    hwtest::skip("DMA write from flash", "write_dma takes a &'static mut RAM buffer");
-
     // Past `TOTAL_CNT`'s 12 bits: two chunks.
     let big = [0xa5u8; 5000];
     let t = Instant::now();
-    spi.blocking_write(&big).unwrap();
-    let us = t.elapsed().as_micros();
-    check!((39_500..42_500).contains(&us), "blocking write 5000 B: {} us", us);
-
-    let t = Instant::now();
-    let r = spi.write_dma(TX5000.take().unwrap()).ok().unwrap().wait(Irqs).await;
+    let r = spi.blocking_write(&big);
     let us = t.elapsed().as_micros();
     check!(
         r.is_ok() && (39_500..42_500).contains(&us),
-        "DMA write 5000 B: {} us",
-        us
+        "blocking write 5000 B: {} us, {:?}",
+        us,
+        r
     );
 
     let config = spi::Config::new(Hertz::mhz(15));
@@ -166,6 +156,37 @@ async fn main(_spawner: Spawner) -> ! {
         spi.transfer_in_place(&mut buf).await.unwrap();
         check!(buf == sent, "loopback MODE_3 LSB first");
     }
+
+    // DMA writes last: on this HAL a DMA write can leave the controller busy
+    // and the chip stops responding afterwards.
+    spi.set_config(spi::Config::new(Hertz::mhz(1))).unwrap();
+    let t = Instant::now();
+    let r = spi.write_dma(TX1000.take().unwrap()).ok().unwrap().wait(Irqs).await;
+    let us = t.elapsed().as_micros();
+    check!(
+        r.is_ok() && (7_900..8_600).contains(&us),
+        "DMA write 1000 B: {} us, {:?}",
+        us,
+        r.as_ref().map(|_| ()).map_err(|(e, _)| *e)
+    );
+    // Has the last byte gone? Time until the FIFO is empty and the shifter
+    // is free.
+    let t = Instant::now();
+    while !(hal::pac::SPI0.fifo_count().read().fifo_count() == 0 && hal::pac::SPI0.int_flag().read().free())
+        && t.elapsed().as_millis() < 20
+    {}
+    hwtest::println!("  bus idle {} us after the DMA wait returned", t.elapsed().as_micros());
+    hwtest::skip("DMA write from flash", "write_dma takes a &'static mut RAM buffer");
+
+    let t = Instant::now();
+    let r = spi.write_dma(TX5000.take().unwrap()).ok().unwrap().wait(Irqs).await;
+    let us = t.elapsed().as_micros();
+    check!(
+        r.is_ok() && (39_500..42_500).contains(&us),
+        "DMA write 5000 B: {} us, {:?}",
+        us,
+        r.as_ref().map(|_| ()).map_err(|(e, _)| *e)
+    );
 
     hwtest::done("spi")
 }
