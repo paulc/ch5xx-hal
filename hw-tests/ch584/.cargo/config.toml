@@ -1,0 +1,14 @@
+[build]
+# Not riscv32imac: the QingKe V3C core has no A extension.
+target = "riscv32imc-unknown-none-elf"
+
+[target.riscv32imc-unknown-none-elf]
+# probe-rs has no CH58x target, so flash with wlink, which reports the CH584
+# as a CH585 (same die). hw-test.sh adds --enable-sdi-print --watch-serial.
+runner = "wlink --chip CH585 flash"
+# As the HAL's examples/ch585: `+b` for the core's Zba/Zbb/Zbs, `+xwchc` for
+# WCH's compressed loads/stores.
+rustflags = ["-C", "target-feature=+b,+xwchc"]
+
+[unstable]
+build-std = ["core"]
