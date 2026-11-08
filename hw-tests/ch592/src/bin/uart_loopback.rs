@@ -17,7 +17,10 @@ fn main() -> ! {
     let mut p = hal::init(hal::rcc::Config::PLL_60MHZ.into());
     hwtest::sdi_enable();
 
-    for &baud in &[9600u32, 115_200, 1_000_000] {
+    // The HAL fixes DIV at 1 and refuses a rate more than 2% off, so the fast
+    // rate is HCLK / 64 (DL = 8), about 1 Mbaud, rather than 1 Mbaud itself.
+    let fast = hal::rcc::clocks().sysclk.0 / 64;
+    for &baud in &[9600u32, 115_200, fast] {
         let mut uart = Uart::new_blocking::<0>(
             p.UART0.reborrow(),
             p.PB4.reborrow(),
@@ -56,7 +59,7 @@ fn main() -> ! {
     let ok = uart.blocking_read(&mut rx).is_ok() && rx == tx;
     check!(ok, "uart0 loopback 7E2");
 
-    // The HAL refuses a rate more than 2% off: 115200 from the 5.33 MHz reset
+    // A rate more than 2% off is refused: 115200 from the 5.33 MHz reset
     // clock would be 111.1 kbaud. At 60 MHz, 3 Mbaud is 2.5 Mbaud.
     check!(
         matches!(
